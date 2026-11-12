@@ -128,13 +128,20 @@ namespace SiliconeTycoon.Sim
         public List<LocationDef> Locations = new List<LocationDef>();
         public List<BlockDef> Blocks = new List<BlockDef>();
         public List<PackageDef> Packages = new List<PackageDef>();
+        public List<SegmentDef> Segments = new List<SegmentDef>();
+        public List<CustomerDef> Customers = new List<CustomerDef>();
+        public List<RivalDef> Rivals = new List<RivalDef>();
 
         public ProcessNodeDef Node(string id) => Nodes.FirstOrDefault(n => n.Id == id);
         public LocationDef Location(string id) => Locations.FirstOrDefault(l => l.Id == id);
         public BlockDef Block(string id) => Blocks.FirstOrDefault(b => b.Id == id);
         public PackageDef Package(string id) => Packages.FirstOrDefault(p => p.Id == id);
+        public SegmentDef Segment(string id) => Segments.FirstOrDefault(x => x.Id == id);
+        public CustomerDef Customer(string id) => Customers.FirstOrDefault(x => x.Id == id);
+        public RivalDef Rival(string id) => Rivals.FirstOrDefault(x => x.Id == id);
 
-        public static GameData FromJson(string nodesJson, string locationsJson, string blocksJson = null, string packagesJson = null)
+        public static GameData FromJson(string nodesJson, string locationsJson, string blocksJson = null, string packagesJson = null,
+            string segmentsJson = null, string customersJson = null, string rivalsJson = null)
         {
             var d = new GameData
             {
@@ -142,6 +149,9 @@ namespace SiliconeTycoon.Sim
                 Locations = JsonSerializer.Deserialize<List<LocationDef>>(locationsJson, SimJson.Data),
                 Blocks = blocksJson == null ? new List<BlockDef>() : JsonSerializer.Deserialize<List<BlockDef>>(blocksJson, SimJson.Data),
                 Packages = packagesJson == null ? new List<PackageDef>() : JsonSerializer.Deserialize<List<PackageDef>>(packagesJson, SimJson.Data),
+                Segments = segmentsJson == null ? new List<SegmentDef>() : JsonSerializer.Deserialize<List<SegmentDef>>(segmentsJson, SimJson.Data),
+                Customers = customersJson == null ? new List<CustomerDef>() : JsonSerializer.Deserialize<List<CustomerDef>>(customersJson, SimJson.Data),
+                Rivals = rivalsJson == null ? new List<RivalDef>() : JsonSerializer.Deserialize<List<RivalDef>>(rivalsJson, SimJson.Data),
             };
             var problems = d.Validate();
             if (problems.Count > 0) throw new InvalidOperationException("Game data problems:\n" + string.Join("\n", problems));
@@ -152,7 +162,8 @@ namespace SiliconeTycoon.Sim
         public static GameData FromFolder(string folder)
         {
             string Read(string name) => System.IO.File.ReadAllText(System.IO.Path.Combine(folder, name));
-            return FromJson(Read("nodes.json"), Read("locations.json"), Read("blocks.json"), Read("packages.json"));
+            return FromJson(Read("nodes.json"), Read("locations.json"), Read("blocks.json"), Read("packages.json"),
+                Read("segments.json"), Read("customers.json"), Read("rivals.json"));
         }
 
         public List<string> Validate()
@@ -182,6 +193,26 @@ namespace SiliconeTycoon.Sim
             foreach (var g in Packages.GroupBy(k => k.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate package id {g.Key}");
             foreach (var k in Packages)
                 if (k.Pins <= 0 || k.MaxPowerW <= 0 || k.MaxDieMm2 <= 0 || k.Yield <= 0 || k.Yield > 1) p.Add($"{k.Id}: bad package values");
+            foreach (var g in Segments.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate segment id {g.Key}");
+            foreach (var x in Segments)
+            {
+                if (!Curves.Valid(x.Demand) || !Curves.Valid(x.Price) || !Curves.Valid(x.Need)) p.Add($"{x.Id}: Demand, Price and Need must be [[year, value], ...] in year order");
+                if (x.OpenShare < 0 || x.OpenShare > 1) p.Add($"{x.Id}: OpenShare must be 0-1");
+            }
+            foreach (var g in Customers.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate customer id {g.Key}");
+            foreach (var x in Customers)
+            {
+                if (Segment(x.SegmentId) == null) p.Add($"{x.Id}: unknown segment {x.SegmentId}");
+                if (x.Share <= 0 || x.Share > 1 || x.CycleMonths < 6 || x.LeadMonths < 1) p.Add($"{x.Id}: bad share, cycle or lead time");
+            }
+            foreach (var seg in Segments)
+            {
+                double shares = Customers.Where(x => x.SegmentId == seg.Id).Sum(x => x.Share);
+                if (shares + seg.OpenShare > 1.0001) p.Add($"{seg.Id}: customer shares plus OpenShare exceed 100%");
+            }
+            foreach (var x in Rivals)
+                foreach (var id in x.Segments)
+                    if (Segment(id) == null) p.Add($"{x.Id}: unknown segment {id}");
             return p;
         }
     }

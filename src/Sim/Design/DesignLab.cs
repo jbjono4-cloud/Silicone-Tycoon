@@ -72,13 +72,14 @@ namespace SiliconeTycoon.Sim
         /// <summary>Kinds a core needs short wires to.</summary>
         static readonly BlockKind[] CorePartners = { BlockKind.Ram, BlockKind.Rom, BlockKind.MemoryInterface, BlockKind.Graphics };
 
-        public static DesignStats Analyze(GameData d, GameState s, ChipDesign c)
+        /// <param name="ignoreNodeReady">For rivals, who track their own nodes.</param>
+        public static DesignStats Analyze(GameData d, GameState s, ChipDesign c, bool ignoreNodeReady = false)
         {
             var st = new DesignStats();
             var n = d.Node(c.NodeId);
             var pkg = d.Package(c.PackageId);
             if (n == null) { st.Add(2, "Choose a process node."); return st; }
-            if (!s.NodeReady(n.Id)) st.Add(2, $"The {n.Name} process isn't ready yet.");
+            if (!ignoreNodeReady && !s.NodeReady(n.Id)) st.Add(2, $"The {n.Name} process isn't ready yet.");
             if (pkg == null) st.Add(2, "Choose a package.");
             else if (s.Year < pkg.Year) st.Add(2, $"The {pkg.Name} isn't available until {pkg.Year}.");
             if (c.Blocks.Count == 0) { st.Add(2, "Place at least one block."); return st; }
@@ -228,6 +229,52 @@ namespace SiliconeTycoon.Sim
             c.DieW = Math.Round(maxX + 0.005, 2);
             c.DieH = Math.Round(y + rowH + 0.005, 2);
             c.UseDesignHouse = true;
+        }
+
+        /// <summary>
+        /// A straightforward chip for a segment on a node, from blocks available this year: an efficient core plus ROM for
+        /// control work; the fastest core plus RAM no bigger than it for computing; an efficient core plus the best graphics
+        /// unit for consoles. Uses the smallest I/O ring and cheapest package that pass analysis, and lowers the rated clock
+        /// if needed to stay under <paramref name="maxPowerW"/>. Null if nothing fits.
+        /// </summary>
+        public static ChipDesign PlanForSegment(GameData d, GameState s, string nodeId, Metric metric, string name,
+            bool ignoreNodeReady = false, double maxPowerW = double.PositiveInfinity)
+        {
+            int year = s.Year;
+            List<BlockDef> Avail(BlockKind k) => d.Blocks.Where(b => b.Kind == k && b.Year <= year).ToList();
+            var cores = Avail(BlockKind.Core);
+            var core = metric == Metric.Compute
+                ? cores.OrderByDescending(b => b.Ipc).FirstOrDefault()
+                : cores.OrderByDescending(b => b.Ipc / b.Transistors).FirstOrDefault();
+            var ids = new List<string>();
+            if (core != null) ids.Add(core.Id);
+            BlockDef extra = metric switch
+            {
+                Metric.Control => Avail(BlockKind.Rom).OrderByDescending(b => b.RomBytes).FirstOrDefault(),
+                Metric.Compute => Avail(BlockKind.Ram).Where(b => core == null || b.Transistors <= core.Transistors).OrderByDescending(b => b.RamBytes).FirstOrDefault(),
+                _ => Avail(BlockKind.Graphics).OrderByDescending(b => b.Graphics).FirstOrDefault(),
+            };
+            if (extra != null) ids.Add(extra.Id);
+            var mems = Avail(BlockKind.MemoryInterface);
+            var mem = metric == Metric.Control
+                ? mems.OrderBy(b => b.Transistors).FirstOrDefault()          // control code needs little bandwidth
+                : mems.OrderByDescending(b => b.BytesPerClock).FirstOrDefault();
+            if (mem != null) ids.Add(mem.Id);
+
+            foreach (var io in Avail(BlockKind.Io).OrderBy(b => b.Pins))
+                foreach (var pkg in d.Packages.Where(p => p.Year <= year).OrderBy(p => p.Cost))
+                {
+                    var c = Starter(d, name, nodeId, pkg.Id, ids.Concat(new[] { io.Id }).ToArray());
+                    var st = Analyze(d, s, c, ignoreNodeReady);
+                    if (st.Valid && st.PowerW > maxPowerW)
+                    {
+                        c.TargetClockMHz = Math.Floor(st.ClockMHz * maxPowerW / st.PowerW * 0.95 * 100) / 100;
+                        if (c.TargetClockMHz <= 0) continue;
+                        st = Analyze(d, s, c, ignoreNodeReady);
+                    }
+                    if (st.Valid && st.PowerW <= maxPowerW) return c;
+                }
+            return null;
         }
 
         /// <summary>A starter design: the given blocks on a node and package, placed by the design house.</summary>

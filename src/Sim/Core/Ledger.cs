@@ -19,6 +19,7 @@ namespace SiliconeTycoon.Sim
         public const string DesignStaff = "Design engineers";
         public const string MaskSets = "Mask sets";
         public const string DesignHouse = "Design house fees";
+        public const string Penalties = "Contract penalties";
     }
 
     public class Loan

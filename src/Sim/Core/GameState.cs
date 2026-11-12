@@ -37,6 +37,14 @@ namespace SiliconeTycoon.Sim
         public List<Fab> Fabs = new List<Fab>();
         public List<ChipDesign> Designs = new List<ChipDesign>();
         public List<DesignTeam> DesignTeams = new List<DesignTeam>();
+
+        public List<StockItem> Inventory = new List<StockItem>();
+        public List<Listing> Listings = new List<Listing>();
+        public List<Rfq> Rfqs = new List<Rfq>();
+        public List<Contract> Contracts = new List<Contract>();
+        public List<CustomerState> Customers = new List<CustomerState>();
+        public List<RivalState> Rivals = new List<RivalState>();
+        public List<MarketRecord> MarketHistory = new List<MarketRecord>();
         public List<NewsItem> News = new List<NewsItem>();
 
         [JsonIgnore] public double Cash => Ledger.Cash;
@@ -46,7 +54,9 @@ namespace SiliconeTycoon.Sim
         [JsonIgnore] public double Inflation => Calendar.Inflation(YearF);
 
         /// <summary>How reputation affects buyers and lenders: 0.25 at -100, 0.65 for a newcomer, 1.25 for a legend. (From Console Tycoon.)</summary>
-        [JsonIgnore] public double RepFactor => Rep >= 0 ? 0.65 + 0.6 * Rep : 0.65 + 0.4 * Rep;
+        [JsonIgnore] public double RepFactor => RepFactorOf(Rep);
+
+        public static double RepFactorOf(double rep) => rep >= 0 ? 0.65 + 0.6 * rep : 0.65 + 0.4 * rep;
 
         public static string RepWord(double rep) => rep >= 0.75 ? "industry legend" : rep >= 0.45 ? "well respected" : rep >= 0.15 ? "known in the trade" : rep > -0.15 ? "newcomer" : rep > -0.5 ? "distrusted" : "notorious";
 

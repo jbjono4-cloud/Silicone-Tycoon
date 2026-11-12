@@ -4,12 +4,12 @@ using System.IO;
 using System.Linq;
 using SiliconeTycoon.Sim;
 
-// Headless run of the sim with a cautious scripted company, printing one line per quarter.
+// Headless run of the whole sim with a simple scripted company, printing one line per quarter.
 // Usage: dotnet run --project tools/SimRunner -- [years=15] [seed=1] [dataFolder]
-// The company designs a real chip for each new node (best core, memory interface, smallest I/O ring and cheapest package
-// that pass analysis), tapes it out, steps it until it can ship, then makes and bins it in its fabs.
-// There is no market yet (milestone 3), so sales are faked: a placeholder price that rises with performance, and a
-// monthly demand ceiling that grows over time. Unsold good dies wait in stock.
+//
+// The company: one fab per new node; a chip per segment on its newest node (planned like the rivals plan theirs);
+// steps chips until they can ship; lists every chip with distributors at its cost plus a margin; bids on every request it
+// can meet; and fills contracts before the open market. Rivals and customers are the real market.
 
 int years = args.Length > 0 ? int.Parse(args[0]) : 15;
 ulong seed = args.Length > 1 ? ulong.Parse(args[1]) : 1;
@@ -18,120 +18,119 @@ string dataFolder = args.Length > 2 ? args[2] : Path.Combine(AppContext.BaseDire
 var d = GameData.FromFolder(dataFolder);
 var s = Simulation.NewGame(d, new NewGameOptions { CompanyName = "Runner Semiconductor", Seed = seed, StartingCash = 6_000_000 });
 var team = s.DesignTeams[0];
+var segmentOf = new Dictionary<string, string>();   // our chip id -> segment it was planned for
 
-const double BasePrice = 30;                  // 1970 dollars per die for 1970-class performance, falling 8% a year
-const double StartDemand = 12_000;            // dies a month in 1970, growing 30% a year
-double baseCompute = 0;
-
-double DiePrice(ChipDesign c) => BasePrice * Math.Sqrt(Math.Max(1, c.Stats.Compute / baseCompute)) * Math.Pow(0.92, s.YearF - 1970) * s.Inflation;
-double WeeklyDemand() => StartDemand * Math.Pow(1.3, s.YearF - 1970) / Calendar.WeeksPerMonth;
 string Best() => d.Nodes.Where(n => s.NodeReady(n.Id)).OrderBy(n => n.FeatureNm).First().Id;
 double LastQuarterProfit() => s.Ledger.Months.Skip(Math.Max(0, s.Ledger.Months.Count - 3)).Sum(m => m.Profit);
-
 string CheapestSite() => d.Locations
     .Where(l => s.Year >= l.From && s.Year <= l.To)
     .OrderBy(l => 0.55 + 0.3 * l.LabourIndex + 0.15 * l.PowerIndex - l.Subsidy)
     .First().Id;
-
-BlockDef BestOf(BlockKind kind, Func<BlockDef, double> score) =>
-    d.Blocks.Where(b => b.Kind == kind && b.Year <= s.Year).OrderByDescending(score).FirstOrDefault();
-
-// The best simple microprocessor the company can make on a node: first valid combination of I/O ring and package.
-ChipDesign PlanChip(string nodeId)
-{
-    var core = BestOf(BlockKind.Core, b => b.Ipc);
-    var mem = BestOf(BlockKind.MemoryInterface, b => b.BytesPerClock);
-    foreach (var io in d.Blocks.Where(b => b.Kind == BlockKind.Io && b.Year <= s.Year).OrderBy(b => b.Pins))
-        foreach (var pkg in d.Packages.Where(p => p.Year <= s.Year).OrderBy(p => p.Cost))
-        {
-            var c = DesignLab.Starter(d, $"RS-{s.Designs.Count + 1}", nodeId, pkg.Id, core.Id, mem.Id, io.Id);
-            if (DesignLab.Analyze(d, s, c).Valid) return c;
-        }
-    return null;
-}
+// cost per chip, from the estimate at design time carried forward by inflation
+double CostOf(ChipDesign c) => c.Stats.CostPerGoodDie / Calendar.Inflation(Calendar.YearF(c.StartedTick)) * s.Inflation;
+string Bin(ChipDesign c) => Binning.BinsFor(c)[0].Name;
 
 void Fail(string err) { if (err != null) Console.WriteLine($"  ! {Calendar.DateLabel(s.Tick)}: {err}"); }
 
-Fail(FabOps.Build(d, s, "Fab 1", "n10um", "us_ca", 500));
-var first = PlanChip("n10um");
-Fail(DesignOps.StartDesign(d, s, first, team.Id));
-baseCompute = first.Stats.Compute;
+bool StartChip(SegmentDef seg)
+{
+    var c = DesignLab.PlanForSegment(d, s, Best(), seg.Metric, $"RS-{s.Designs.Count + 1}", maxPowerW: seg.MaxPowerW);
+    if (c == null) return false;
+    string err = DesignOps.StartDesign(d, s, c, team.Id);
+    Fail(err);
+    if (err == null) segmentOf[c.Id] = seg.Id;
+    return err == null;
+}
 
-var stock = new Dictionary<string, double>();   // design id -> good dies waiting
-Console.WriteLine($"{"Quarter",-8} {"Cash",9} {"Debt",9} {"Revenue",9} {"Profit",9} {"Stock",7}  Fabs (node, stage, chip, util, D0, sellable)");
+Fail(FabOps.Build(d, s, "Fab 1", "n10um", "us_ca", 500));
+StartChip(d.Segment("embedded"));
+
+Console.WriteLine($"{"Quarter",-8} {"Cash",9} {"Debt",8} {"Revenue",9} {"Profit",9} {"Rep",4} {"Deals",5}  Share: embedded / home / consoles   Rivals' revenue");
 int endTick = s.Tick + years * Calendar.WeeksPerYear;
 int newsSeen = 0;
 while (s.Tick < endTick && !s.GameOver)
 {
     Simulation.Advance(d, s);
 
-    // finished lots: real chips go to stock, test wafers are scrapped
-    foreach (var f in s.Fabs)
-        foreach (var lot in FabOps.Undelivered(f).ToList())
-        {
-            if (lot.Bins != null)
-            {
-                stock.TryGetValue(lot.DesignId, out var have);
-                stock[lot.DesignId] = have + lot.GoodDies;
-            }
-            lot.Delivered = true;
-        }
-
-    // sell newest chips first, up to this week's demand
-    double demand = WeeklyDemand();
-    foreach (var id in stock.Keys.OrderByDescending(id => s.Design(id).ReleasedTick).ToList())
-    {
-        double sold = Math.Min(stock[id], demand);
-        if (sold <= 0) continue;
-        stock[id] -= sold;
-        demand -= sold;
-        s.Ledger.Book(Accounts.Sales, sold * DiePrice(s.Design(id)));
-    }
-    double totalStock = stock.Values.Sum();
-
-    // chip projects: step until shippable, then release
+    // chip projects: step until shippable, then release and list
     foreach (var v in s.Designs.Where(x => x.Stage == DesignStage.Validated).ToList())
-        Fail(v.Showstoppers > 0 || v.FoundBugs > 2 ? DesignOps.Step(d, s, v) : DesignOps.Release(d, s, v));
-
-    // each producing fab makes the newest released chip for its node, else test wafers at a quarter of capacity
-    foreach (var f in s.Fabs.Where(f => f.Producing))
     {
-        var chip = s.Designs.Where(x => x.Stage == DesignStage.Released && x.NodeId == f.NodeId).OrderByDescending(x => x.ReleasedTick).FirstOrDefault();
-        if (chip != null && f.DesignId != chip.Id) Fail(FabOps.AssignDesign(d, s, f, chip.Id));
-        int plan = f.DesignId == null ? f.Capacity / 4 : totalStock > WeeklyDemand() * 8 ? f.Capacity / 2 : f.Capacity;
-        FabOps.SetPlannedStarts(f, plan);
+        if (v.Showstoppers > 0 || v.FoundBugs > 2) { Fail(DesignOps.Step(d, s, v)); continue; }
+        Fail(DesignOps.Release(d, s, v));
     }
 
-    bool healthy = LastQuarterProfit() > 0 && s.OverdrawnMonths == 0;
-    string best = Best();
-
-    // a new chip for the newest node when the team is free
-    if (team.ProjectId == null && healthy && !s.Designs.Any(x => x.NodeId == best && x.Stage != DesignStage.Cancelled))
+    if (Calendar.WeekInMonth(s.Tick) == 0)
     {
-        var plan = PlanChip(best);
-        if (plan != null) Fail(DesignOps.StartDesign(d, s, plan, team.Id));
-    }
+        var released = s.Designs.Where(x => x.Stage == DesignStage.Released).ToList();
 
-    // the node race, one programme at a time
-    var next = d.Nodes.FirstOrDefault(n => n.Requires == best && !s.NodeReady(n.Id));
-    if (next != null && !s.NodePrograms.Any(p => !p.Done) && healthy
-        && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && s.Cash > next.ResearchCost * s.Inflation * 0.5)
-        Fail(ProcessResearch.Start(d, s, next.Id));
-
-    // one fab per new node, once profitable and able to fund most of it
-    if (!s.Fabs.Any(f => f.Stage == FabStage.Construction) && healthy && !s.Fabs.Any(f => f.NodeId == best))
-    {
-        var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
-        if (q.Problem == null && s.Cash + Finance.Headroom(s) > q.NetCapex * 0.8)
+        // list everything at cost plus 40%, but no lower than 60% of the going price in its segment
+        foreach (var c in released)
         {
-            if (s.Cash < q.NetCapex * 0.5) Finance.Borrow(s, Math.Min(Finance.Headroom(s), q.NetCapex * 0.5 - s.Cash));
-            Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
+            var seg = d.Segment(segmentOf.GetValueOrDefault(c.Id, "embedded"));
+            double price = Math.Max(CostOf(c) * 1.4, Market.ExpectedPrice(seg, s.YearF) * 0.6);
+            Market.SetListing(s, c.Id, Bin(c), Math.Round(price, 2));
         }
-    }
 
-    // stay solvent: borrow when cash runs low, repay when flush
-    if (s.Cash < 300_000 * s.Inflation && Finance.Headroom(s) > 0) Finance.Borrow(s, Math.Min(Finance.Headroom(s), 1_000_000 * s.Inflation));
-    if (s.Cash > 8_000_000 * s.Inflation && s.Ledger.Debt > 0) Finance.Repay(s, Math.Min(s.Ledger.Debt, s.Cash - 6_000_000 * s.Inflation));
+        // bid on every open request we can meet, with the strongest chip, at cost plus 30% (or 85% of the going price)
+        foreach (var rfq in s.Rfqs.Where(r => !r.Bids.Any(b => b.BidderId == Market.Player)))
+        {
+            var seg = d.Segment(rfq.SegmentId);
+            var options = s.Designs
+                .Where(c => c.Stats != null && c.Stage != DesignStage.Draft && c.Stage != DesignStage.Cancelled)
+                .Select(c => (chip: c, price: Math.Min(rfq.MaxPrice, Math.Max(CostOf(c) * 1.3, rfq.ExpectedPrice * 0.85))))
+                .Where(o => Market.CheckBid(d, rfq, o.chip, Bin(o.chip), o.price) == null && o.price >= CostOf(o.chip))
+                .OrderByDescending(o => Market.Perf(o.chip, Bin(o.chip), seg.Metric))
+                .ToList();
+            if (options.Count > 0) Market.SubmitBid(d, s, rfq.Id, options[0].chip.Id, Bin(options[0].chip), options[0].price);
+        }
+
+        // each producing fab makes the chip on its node with the biggest contract orders, else the newest; idle chips get test wafers
+        double monthlyOrders = s.Contracts.Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active).Sum(k => k.LastMonthOrdered);
+        double lastSales = s.MarketHistory.Where(r => r.Month == s.MonthIndex - 1).Sum(r => r.PlayerUnits);
+        double stock = s.Inventory.Sum(x => x.Units);
+        foreach (var f in s.Fabs.Where(f => f.Producing))
+        {
+            var chip = released.Where(c => c.NodeId == f.NodeId)
+                .OrderByDescending(c => s.Contracts.Where(k => k.DesignId == c.Id && k.Status == ContractStatus.Active).Sum(k => k.LastMonthOrdered))
+                .ThenByDescending(c => c.ReleasedTick)
+                .FirstOrDefault();
+            if (chip != null && f.DesignId != chip.Id) Fail(FabOps.AssignDesign(d, s, f, chip.Id));
+            bool overstocked = stock > 3 * Math.Max(1, Math.Max(monthlyOrders, lastSales));
+            FabOps.SetPlannedStarts(f, f.DesignId == null ? f.Capacity / 4 : overstocked ? f.Capacity / 3 : f.Capacity);
+        }
+
+        bool healthy = LastQuarterProfit() > 0 && s.OverdrawnMonths == 0;
+        string best = Best();
+
+        // a chip for each active segment on the newest node, one project at a time
+        if (team.ProjectId == null && (healthy || s.Designs.Count(x => x.Stage == DesignStage.Released) == 0))
+            foreach (var seg in d.Segments.Where(x => x.Active(s.YearF)))
+            {
+                bool have = s.Designs.Any(c => c.NodeId == best && c.Stage != DesignStage.Cancelled && segmentOf.GetValueOrDefault(c.Id) == seg.Id);
+                if (!have && StartChip(seg)) break;
+            }
+
+        // the node race, one programme at a time
+        var next = d.Nodes.FirstOrDefault(n => n.Requires == best && !s.NodeReady(n.Id));
+        if (next != null && !s.NodePrograms.Any(p => !p.Done) && healthy
+            && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && s.Cash > next.ResearchCost * s.Inflation * 0.5)
+            Fail(ProcessResearch.Start(d, s, next.Id));
+
+        // one fab per new node, once profitable and able to fund most of it
+        if (!s.Fabs.Any(f => f.Stage == FabStage.Construction) && healthy && !s.Fabs.Any(f => f.NodeId == best))
+        {
+            var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
+            if (q.Problem == null && s.Cash + Finance.Headroom(s) > q.NetCapex * 0.8)
+            {
+                if (s.Cash < q.NetCapex * 0.5) Finance.Borrow(s, Math.Min(Finance.Headroom(s), q.NetCapex * 0.5 - s.Cash));
+                Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
+            }
+        }
+
+        // stay solvent: borrow when cash runs low, repay when flush
+        if (s.Cash < 300_000 * s.Inflation && Finance.Headroom(s) > 0) Finance.Borrow(s, Math.Min(Finance.Headroom(s), 1_000_000 * s.Inflation));
+        if (s.Cash > 8_000_000 * s.Inflation && s.Ledger.Debt > 0) Finance.Repay(s, Math.Min(s.Ledger.Debt, s.Cash - 6_000_000 * s.Inflation));
+    }
 
     for (; newsSeen < s.News.Count; newsSeen++)
     {
@@ -142,27 +141,36 @@ while (s.Tick < endTick && !s.GameOver)
 
     if (Calendar.IsQuarterEnd(s.Tick - 1))
     {
+        int lastMonth = s.MonthIndex - 1;
         var q3 = s.Ledger.Months.Skip(Math.Max(0, s.Ledger.Months.Count - 3)).ToList();
-        string fabs = string.Join(" | ", s.Fabs.Select(f =>
+        string Share(string seg)
         {
-            var n = d.Node(f.NodeId);
-            double d0 = FabOps.D0(d, f);
-            var recent = f.Lots.Where(l => l.Done && l.Bins != null).TakeLast(8).ToList();
-            string sellable = recent.Count == 0 ? "  -" : $"{recent.Sum(l => l.GoodDies) / (double)Math.Max(1, recent.Sum(l => l.GrossDies)),4:P0}";
-            string chip = s.Design(f.DesignId)?.Name ?? "test";
-            return $"{n.Name} {f.Stage.ToString()[..4]} {chip} {f.LastUtilisation,4:P0} D0 {d0,4:0.0} {sellable}";
-        }));
-        string stockText = totalStock >= 1e6 ? $"{totalStock / 1e6:0.0}M" : $"{totalStock / 1e3:0}k";
-        Console.WriteLine($"{Calendar.QuarterLabel(s.Tick - 1),-8} {Format.Big(s.Cash),9} {Format.Big(s.Ledger.Debt),9} {Format.Big(q3.Sum(m => m.Revenue)),9} {Format.Big(q3.Sum(m => m.Profit)),9} {stockText,7}  {fabs}");
+            var recs = s.MarketHistory.Where(r => r.SegmentId == seg && r.Month > lastMonth - 3).ToList();
+            double demand = recs.Sum(r => r.Demand);
+            return demand <= 0 ? "  - " : $"{recs.Sum(r => r.PlayerUnits) / demand,4:P0}";
+        }
+        int deals = s.Contracts.Count(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active);
+        string rivals = string.Join(", ", s.Rivals.Select(r => $"{r.Name.Split(' ')[0]} {Format.Big(r.LastMonthRevenue * 3)}"));
+        Console.WriteLine($"{Calendar.QuarterLabel(s.Tick - 1),-8} {Format.Big(s.Cash),9} {Format.Big(s.Ledger.Debt),8} {Format.Big(q3.Sum(m => m.Revenue)),9} " +
+                          $"{Format.Big(q3.Sum(m => m.Profit)),9} {s.Rep * 100,4:0} {deals,5}  {Share("embedded")} / {Share("home")} / {Share("consoles")}   {rivals}");
     }
 }
 
 Console.WriteLine();
-Console.WriteLine("Chips:");
+Console.WriteLine("Our chips:");
 foreach (var c in s.Designs)
 {
     var st = c.Stats;
-    Console.WriteLine($"  {c.Name,-6} {d.Node(c.NodeId).Name,-7} {c.Stage,-10} {c.SteppingName,-3} {st.Transistors,8:N0} tr  {c.DieAreaMm2,6:0.0} mm²  {st.ClockMHz,6:0.00} MHz  {st.PowerW,5:0.00} W  compute {st.Compute,6:0.00}  {d.Package(c.PackageId).Name}");
+    string seg = segmentOf.GetValueOrDefault(c.Id, "?");
+    Console.WriteLine($"  {c.Name,-6} {seg,-9} {d.Node(c.NodeId).Name,-7} {c.Stage,-10} {c.SteppingName,-3} {st.Transistors,8:N0} tr {c.DieAreaMm2,6:0.0} mm² {st.ClockMHz,6:0.00} MHz {st.PowerW,5:0.00} W  {d.Package(c.PackageId).Name}");
 }
 Console.WriteLine();
-Console.WriteLine(s.GameOver ? s.EndText : $"Finished at {Calendar.DateLabel(s.Tick)} with {Format.Big(s.Cash)} cash and {Format.Big(s.Ledger.Debt)} debt.");
+Console.WriteLine("Rivals:");
+foreach (var r in s.Rivals)
+{
+    string node = Rivals.BestNode(d, r)?.Name ?? "?";
+    string chips = string.Join(", ", r.Products.Select(p => $"{p.Design.Name} ({p.SegmentId}, {d.Node(p.Design.NodeId).Name})"));
+    Console.WriteLine($"  {r.Name}: {node}, capacity {r.Capacity:N0}/month, lifetime revenue {Format.Big(r.TotalRevenue)}. Selling: {chips}");
+}
+Console.WriteLine();
+Console.WriteLine(s.GameOver ? s.EndText : $"Finished at {Calendar.DateLabel(s.Tick)} with {Format.Big(s.Cash)} cash, {Format.Big(s.Ledger.Debt)} debt, reputation {s.Rep * 100:0} ({GameState.RepWord(s.Rep)}).");

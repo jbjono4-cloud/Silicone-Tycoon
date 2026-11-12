@@ -44,3 +44,15 @@ Indexes are relative to the United States = 1.0. `Subsidy` is the share of fab c
 ## packages.json
 
 `Pins`, `MaxPowerW` and `MaxDieMm2` limit what fits; `Cost` (1970 dollars) is added per chip; `Yield` is the share surviving assembly.
+
+## segments.json
+
+`Demand` (chips a month), `Price` (1970 dollars per chip) and `Need` (performance a competitive chip has, in the segment's `Metric`: `Control`, `Compute` or `Graphics`) are `[[year, value], ...]` tables. `OpenShare` is the share bought through distributors; `PriceSensitivity` and `PerfWeight` shape how buyers score chips; `MaxPowerW` is what customers' products can cool.
+
+## customers.json
+
+`Share` of the segment each buys, `CycleMonths` (product generation and contract length), `LeadMonths` from award to first delivery, `PriceSensitivity` (multiplies the segment's), `Loyalty` (score bonus for the current supplier). Shares plus the segment's `OpenShare` must not exceed 100%.
+
+## rivals.json
+
+`NodeLagYears` behind history's node dates, `Markup` over cost, starting `Rep` and `StartCapacity` (chips a month), design `Engineers`, and the `Segments` they compete in.

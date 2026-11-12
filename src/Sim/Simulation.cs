@@ -39,6 +39,7 @@ namespace SiliconeTycoon.Sim
                 ? new List<string>(o.NodesReady)
                 : d.Nodes.Where(n => n.Year <= o.StartYear).Select(n => n.Id).ToList();
             DesignOps.AddTeam(s, "Design team", o.StartingEngineers);
+            Market.Init(d, s);
             s.Log($"{s.CompanyName} opens its doors with {Format.Big(s.Cash)} in the bank.", 1);
             return s;
         }
@@ -50,6 +51,7 @@ namespace SiliconeTycoon.Sim
             ProcessResearch.WeekTick(d, s);
             DesignOps.WeekTick(d, s);
             foreach (var f in s.Fabs) FabOps.WeekTick(d, s, f);
+            Market.ReceiveLots(s);
             if (Calendar.IsMonthEnd(s.Tick)) MonthEnd(d, s);
             s.Tick++;
         }
@@ -64,6 +66,7 @@ namespace SiliconeTycoon.Sim
         static void MonthEnd(GameData d, GameState s)
         {
             foreach (var f in s.Fabs) FabOps.MonthEnd(d, s, f);
+            Market.MonthEnd(d, s);
             DesignOps.MonthEnd(s);
             Finance.MonthEnd(s);
             s.Ledger.Close(s.MonthIndex);

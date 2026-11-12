@@ -1,0 +1,23 @@
+[
+  {
+    "Id": "embedded", "Name": "Calculators and controllers", "From": 1970, "Metric": "Control",
+    "MaxPowerW": 1.0, "OpenShare": 0.4, "PriceSensitivity": 1.6, "PerfWeight": 0.6,
+    "Demand": [[1970, 20000], [1973, 300000], [1976, 1500000], [1980, 3000000], [1985, 8000000]],
+    "Price":  [[1970, 25], [1973, 8], [1976, 3], [1980, 2], [1985, 1.5]],
+    "Need":   [[1970, 0.05], [1975, 0.3], [1980, 1.0], [1985, 3.0]]
+  },
+  {
+    "Id": "home", "Name": "Home computers", "From": 1976, "Metric": "Compute",
+    "MaxPowerW": 2.5, "OpenShare": 0.3, "PriceSensitivity": 1.2, "PerfWeight": 1.2,
+    "Demand": [[1976, 5000], [1978, 60000], [1980, 150000], [1983, 600000], [1985, 500000]],
+    "Price":  [[1976, 60], [1980, 25], [1985, 30]],
+    "Need":   [[1976, 0.3], [1980, 1.5], [1983, 4.0], [1985, 10.0]]
+  },
+  {
+    "Id": "consoles", "Name": "Games consoles", "From": 1976, "Metric": "Graphics",
+    "MaxPowerW": 2.0, "OpenShare": 0.2, "PriceSensitivity": 1.5, "PerfWeight": 1.0,
+    "Demand": [[1976, 10000], [1978, 80000], [1981, 400000], [1982.5, 700000], [1983.5, 120000], [1985, 300000]],
+    "Price":  [[1976, 20], [1980, 12], [1985, 10]],
+    "Need":   [[1976, 0.3], [1980, 1.5], [1985, 6.0]]
+  }
+]

@@ -1,0 +1,4 @@
+[
+  { "Id": "meridian", "Name": "Meridian Integrated", "Country": "United States", "NodeLagYears": 0.0, "Markup": 1.7, "Rep": 0.35, "StartCapacity": 80000, "Engineers": 10, "Segments": ["embedded", "home", "consoles"] },
+  { "Id": "kestrel",  "Name": "Kestrel Devices",     "Country": "Japan",         "NodeLagYears": 1.0, "Markup": 1.3, "Rep": 0.10, "StartCapacity": 40000, "Engineers": 6,  "Segments": ["embedded", "home"] }
+]
