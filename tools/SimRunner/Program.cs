@@ -21,7 +21,10 @@ var team = s.DesignTeams[0];
 var segmentOf = new Dictionary<string, string>();   // our chip id -> segment it was planned for
 
 string Best() => d.Nodes.Where(n => s.NodeReady(n.Id)).OrderBy(n => n.FeatureNm).First().Id;
-double LastQuarterProfit() => s.Ledger.Months.Skip(Math.Max(0, s.Ledger.Months.Count - 3)).Sum(m => m.Profit);
+// Money the company can reach (cash plus what the bank will still lend), less six months of running costs kept in reserve.
+double Spendable() => s.Cash + Finance.Headroom(s) - 6 * (s.Ledger.LastMonth?.Costs ?? 0);
+// Make sure enough cash is on hand for a payment, borrowing the difference.
+void EnsureCash(double amount) { if (s.Cash < amount) Finance.Borrow(s, Math.Min(Finance.Headroom(s), amount - s.Cash)); }
 string CheapestSite() => d.Locations
     .Where(l => s.Year >= l.From && s.Year <= l.To)
     .OrderBy(l => 0.55 + 0.3 * l.LabourIndex + 0.15 * l.PowerIndex - l.Subsidy)
@@ -51,7 +54,7 @@ bool StartChip(SegmentDef seg)
     return err == null;
 }
 
-Fail(FabOps.Build(d, s, "Fab 1", "n10um", "us_ca", 500));
+Fail(FabOps.Build(d, s, "Fab 1", "n10um", "us_ca", 1000));
 StartChip(d.Segment("embedded"));
 
 Console.WriteLine($"{"Quarter",-8} {"Cash",9} {"Debt",8} {"Revenue",9} {"Profit",9} {"Rep",4} {"Deals",5}  Share: embedded / home / consoles   Rivals' revenue");
@@ -72,11 +75,14 @@ while (s.Tick < endTick && !s.GameOver)
     {
         var released = s.Designs.Where(x => x.Stage == DesignStage.Released).ToList();
 
-        // list everything at cost plus 40%, but no lower than 60% of the going price in its segment
+        // list at the going price while stock is short, 15% under it when chips pile up; never below cost plus 20%
+        double soldLastMonth = s.MarketHistory.Where(r => r.Month == s.MonthIndex - 1).Sum(r => r.PlayerUnits);
         foreach (var c in released)
         {
             var seg = d.Segment(segmentOf.GetValueOrDefault(c.Id, "embedded"));
-            double price = Math.Max(CostOf(c) * 1.4, Market.ExpectedPrice(seg, s.YearF) * 0.6);
+            double onHand = s.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.Units);
+            double factor = onHand > Math.Max(1000, soldLastMonth) ? 0.85 : 1.0;
+            double price = Math.Max(CostOf(c) * 1.2, Market.ExpectedPrice(seg, s.YearF) * factor);
             Market.SetListing(s, c.Id, Bin(c), Math.Round(price, 2));
         }
 
@@ -109,42 +115,55 @@ while (s.Tick < endTick && !s.GameOver)
             FabOps.SetPlannedStarts(f, f.DesignId == null ? f.Capacity / 4 : overstocked ? f.Capacity / 3 : f.Capacity);
         }
 
-        bool healthy = LastQuarterProfit() > 0 && s.OverdrawnMonths == 0;
         string best = Best();
+        bool building = s.Fabs.Any(f => f.Stage == FabStage.Construction);
 
-        // a chip for each active segment on the newest node, one project at a time
-        if (team.ProjectId == null && (healthy || s.Designs.Count(x => x.Stage == DesignStage.Released) == 0))
+        // a chip for each active segment on the newest node whenever the team is free
+        if (team.ProjectId == null)
             foreach (var seg in d.Segments.Where(x => x.Active(s.YearF)))
             {
                 bool have = s.Designs.Any(c => c.NodeId == best && c.Stage != DesignStage.Cancelled && segmentOf.GetValueOrDefault(c.Id) == seg.Id);
                 if (!have && StartChip(seg)) break;
             }
 
-        // the node race, one programme at a time
+        // the node race, one programme at a time, whenever it can be funded
         var next = d.Nodes.FirstOrDefault(n => n.Requires == best && !s.NodeReady(n.Id));
-        if (next != null && !s.NodePrograms.Any(p => !p.Done) && healthy
-            && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && s.Cash > next.ResearchCost * s.Inflation * 0.5)
+        if (next != null && !s.NodePrograms.Any(p => !p.Done)
+            && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && Spendable() > next.ResearchCost * s.Inflation)
             Fail(ProcessResearch.Start(d, s, next.Id));
 
-        // one fab per new node, once profitable and able to fund most of it
-        if (!s.Fabs.Any(f => f.Stage == FabStage.Construction) && healthy && !s.Fabs.Any(f => f.NodeId == best))
+        // a fab on each new node, once it can be funded
+        if (!building && !s.Fabs.Any(f => f.NodeId == best))
         {
             var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
-            if (q.Problem == null && s.Cash + Finance.Headroom(s) > q.NetCapex * 0.8)
+            if (q.Problem == null && Spendable() > q.NetCapex)
             {
-                if (s.Cash < q.NetCapex * 0.5) Finance.Borrow(s, Math.Min(Finance.Headroom(s), q.NetCapex * 0.5 - s.Cash));
+                EnsureCash(q.NetCapex / q.BuildMonths * 2);
                 Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
+                building = true;
             }
         }
 
         // sold out on the newest node: add another fab there
         var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Producing).ToList();
-        if (!s.Fabs.Any(f => f.Stage == FabStage.Construction) && healthy && bestFabs.Count > 0
-            && bestFabs.All(f => f.LastUtilisation > 0.9) && stock < Math.Max(monthlyOrders, lastSales) * 0.5)
+        if (!building && bestFabs.Count > 0 && bestFabs.All(f => f.LastUtilisation > 0.9) && stock < Math.Max(monthlyOrders, lastSales) * 0.5)
         {
             var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
-            if (q.Problem == null && s.Cash > q.NetCapex * 0.6)
+            if (q.Problem == null && Spendable() > q.NetCapex * 1.5)
+            {
+                EnsureCash(q.NetCapex / q.BuildMonths * 2);
                 Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
+            }
+        }
+
+        // old fabs whose chips no longer sell: stop starting wafers (test wafers only)
+        foreach (var f in s.Fabs.Where(f => f.Producing && f.NodeId != best))
+        {
+            var chip = s.Design(f.DesignId);
+            if (chip == null) continue;
+            bool selling = soldLastMonth > 0 && s.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.Units) < 6 * soldLastMonth;
+            bool contracted = s.Contracts.Any(k => k.DesignId == chip.Id && k.Status == ContractStatus.Active);
+            if (!selling && !contracted) FabOps.SetPlannedStarts(f, 0);
         }
 
         // stay solvent: borrow when cash runs low, repay when flush

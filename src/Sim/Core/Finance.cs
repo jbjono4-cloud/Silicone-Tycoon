@@ -14,8 +14,10 @@ namespace SiliconeTycoon.Sim
             (2023, 0.08), (2026, 0.07),
         };
 
-        /// <summary>Head-office running cost per month in 1970 dollars.</summary>
-        public const double HeadOffice = 25000;
+        /// <summary>Fixed head-office cost per month in 1970 dollars.</summary>
+        public const double HeadOffice = 10000;
+        /// <summary>Sales, marketing and admin as a share of the month's revenue.</summary>
+        public const double SgaShare = 0.08;
 
         /// <summary>The rate a new loan would carry: base rate plus a spread that falls with reputation.</summary>
         public static double InterestRate(GameState s) =>
@@ -67,7 +69,8 @@ namespace SiliconeTycoon.Sim
         {
             double interest = s.Ledger.Loans.Sum(l => l.Principal * l.AnnualRate / 12.0);
             if (interest > 0) s.Ledger.Book(Accounts.Interest, -interest);
-            s.Ledger.Book(Accounts.Overhead, -HeadOffice * s.Inflation);
+            double revenue = s.Ledger.Current.Values.Where(v => v > 0).Sum();
+            s.Ledger.Book(Accounts.Overhead, -(HeadOffice * s.Inflation + SgaShare * revenue));
         }
     }
 }
