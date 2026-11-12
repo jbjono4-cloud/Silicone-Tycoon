@@ -93,6 +93,8 @@ namespace SiliconeTycoon.Sim
         public double Rep;
         /// <summary>Starting capacity as a share of the demand in its segments.</summary>
         public double StartShare = 0.2;
+        /// <summary>Most of its segments' demand it will build capacity for.</summary>
+        public double MaxShare = 0.4;
         public int Engineers = 8;
         public List<string> Segments = new List<string>();
     }

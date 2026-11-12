@@ -1,4 +1,4 @@
 [
-  { "Id": "meridian", "Name": "Meridian Integrated", "Country": "United States", "NodeLagYears": 0.0, "PriceFactor": 1.0,  "Rep": 0.35, "StartShare": 0.30, "Engineers": 10, "Segments": ["embedded", "home", "consoles"] },
-  { "Id": "kestrel",  "Name": "Kestrel Devices",     "Country": "Japan",         "NodeLagYears": 1.0, "PriceFactor": 0.85, "Rep": 0.10, "StartShare": 0.15, "Engineers": 6,  "Segments": ["embedded", "home"] }
+  { "Id": "meridian", "Name": "Meridian Integrated", "Country": "United States", "NodeLagYears": 0.0, "PriceFactor": 1.0,  "Rep": 0.35, "StartShare": 0.30, "MaxShare": 0.45, "Engineers": 10, "Segments": ["embedded", "home", "consoles"] },
+  { "Id": "kestrel",  "Name": "Kestrel Devices",     "Country": "Japan",         "NodeLagYears": 1.0, "PriceFactor": 0.85, "Rep": 0.10, "StartShare": 0.15, "MaxShare": 0.25, "Engineers": 6,  "Segments": ["embedded", "home"] }
 ]

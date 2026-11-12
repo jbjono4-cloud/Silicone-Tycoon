@@ -213,6 +213,7 @@ namespace SiliconeTycoon.Sim
             foreach (var x in Rivals)
             {
                 if (x.PriceFactor <= 0 || x.StartShare <= 0 || x.StartShare > 1 || x.Engineers <= 0) p.Add($"{x.Id}: bad price factor, start share or engineers");
+                if (x.MaxShare < x.StartShare || x.MaxShare > 1) p.Add($"{x.Id}: MaxShare must be between StartShare and 1");
             }
             foreach (var x in Rivals)
                 foreach (var id in x.Segments)

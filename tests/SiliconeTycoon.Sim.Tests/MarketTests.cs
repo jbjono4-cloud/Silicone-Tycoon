@@ -247,6 +247,19 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void RivalsDontOutgrowTheirShareOfDemand()
+        {
+            var s = TestData.NewGame();
+            Simulation.AdvanceMonths(D, s, 12 * 12);
+            foreach (var r in s.Rivals)
+            {
+                var def = D.Rival(r.Id);
+                double demand = def.Segments.Sum(id => D.Segment(id).DemandAt(s.YearF));
+                Assert.True(r.Capacity <= def.MaxShare * demand * 1.25, $"{r.Name}: {r.Capacity:N0} vs demand {demand:N0}");
+            }
+        }
+
+        [Fact]
         public void DownBinningFillsOrdersFromBetterBins()
         {
             var s = TestData.NewGame(year: 1975);

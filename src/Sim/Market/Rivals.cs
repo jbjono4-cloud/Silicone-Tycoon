@@ -128,7 +128,9 @@ namespace SiliconeTycoon.Sim
                 r.LastUtilisation = r.Capacity > 0 ? r.UsedThisMonth / r.Capacity : 0;
 
                 // capacity follows sales: fast growth when sold out, slow shrinking when idle
-                if (r.LastUtilisation > 0.85) r.Capacity *= 1.06;
+                double ceiling = Math.Max(MinCapacity, def.MaxShare * def.Segments.Select(id => d.Segment(id)).Where(x => x != null).Sum(x => x.DemandAt(s.YearF)));
+                if (r.LastUtilisation > 0.85) r.Capacity = Math.Min(r.Capacity * 1.06, Math.Max(r.Capacity, ceiling));
+                if (r.Capacity > ceiling * 1.2) r.Capacity = Math.Max(ceiling, r.Capacity * 0.97);   // demand fell away: shed capacity
                 else if (r.LastUtilisation < 0.5 && r.Products.Count > 0) r.Capacity = Math.Max(MinCapacity, r.Capacity * 0.98);
 
                 // idle fabs mean price cuts; full ones let prices recover
