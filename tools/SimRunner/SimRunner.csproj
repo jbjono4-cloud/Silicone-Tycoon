@@ -4,6 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- Run on .NET 9/10 if .NET 8 isn't installed. -->
+    <RollForward>Major</RollForward>
     <RootNamespace>SiliconeTycoon.SimRunner</RootNamespace>
   </PropertyGroup>
 
