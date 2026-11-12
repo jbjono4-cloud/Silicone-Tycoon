@@ -134,15 +134,15 @@ while (s.Tick < endTick && !s.GameOver)
 
         // a fab on each new node, once it can be funded
         if (!building && !s.Fabs.Any(f => f.NodeId == best))
-        {
-            var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
-            if (q.Problem == null && Spendable() > q.NetCapex)
+            foreach (int size in new[] { 1000, 500 })   // the biggest fab it can fund
             {
+                var q = FabOps.Quote(d, s, best, CheapestSite(), size);
+                if (q.Problem != null || Spendable() <= q.NetCapex) continue;
                 EnsureCash(q.NetCapex / q.BuildMonths * 2);
-                Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
+                Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), size));
                 building = true;
+                break;
             }
-        }
 
         // sold out on the newest node: add another fab there
         var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Producing).ToList();

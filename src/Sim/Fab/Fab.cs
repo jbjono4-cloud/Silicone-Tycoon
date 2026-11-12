@@ -93,6 +93,8 @@ namespace SiliconeTycoon.Sim
     public static class FabOps
     {
         public const int DepreciationMonths = 60;
+        /// <summary>Monthly running cost (staff, power, maintenance) as a share of capex, before location factors.</summary>
+        public const double RunningShare = 0.009;
         public const int MinCapacity = 100;
         public const int MaxCapacity = 200000;
         /// <summary>How many dies of a lot are simulated individually; the result is scaled to the lot.</summary>
@@ -116,7 +118,7 @@ namespace SiliconeTycoon.Sim
             q.Capex = capexReal * infl;
             q.Subsidy = q.Capex * l.Subsidy;
             q.NetCapex = q.Capex - q.Subsidy;
-            q.MonthlyRunning = capexReal * infl * 0.012 * RunningFactor(l);
+            q.MonthlyRunning = capexReal * infl * RunningShare * RunningFactor(l);
             q.WaferCost = n.WaferCost * infl * WaferFactor(l);
             q.RecommendedEngineering = capexReal * infl * 0.004;
             q.BuildMonths = n.BuildMonths;
@@ -158,7 +160,7 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
-        public static double RunningCost(GameData d, GameState s, Fab f) => f.CapexReal * s.Inflation * 0.012 * RunningFactor(d.Location(f.LocationId));
+        public static double RunningCost(GameData d, GameState s, Fab f) => f.CapexReal * s.Inflation * RunningShare * RunningFactor(d.Location(f.LocationId));
         public static double WaferCost(GameData d, GameState s, Fab f) => d.Node(f.NodeId).WaferCost * s.Inflation * WaferFactor(d.Location(f.LocationId));
         public static double RecommendedEngineering(GameState s, Fab f) => f.CapexReal * s.Inflation * 0.004;
 
