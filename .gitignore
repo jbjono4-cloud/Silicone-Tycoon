@@ -13,3 +13,6 @@ TestResults/
 .vs/
 .vscode/
 .idea/
+
+# Local sim output
+runs/
