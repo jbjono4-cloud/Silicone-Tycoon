@@ -35,7 +35,11 @@ namespace SiliconeTycoon.Sim
         /// <summary>RFQs cap prices at this multiple of the going price.</summary>
         public const double MaxPriceFactor = 1.5;
         /// <summary>How sharply open-market share follows attractiveness.</summary>
-        public const double ShareExponent = 3;
+        public const double ShareExponent = 2;
+        /// <summary>Reputation gained each month you ship chips through distributors.</summary>
+        public const double RepPerSellingMonth = 0.002;
+        /// <summary>Smallest partial bid a customer will consider, as a share of its expected volume.</summary>
+        public const double MinBidShare = 0.1;
         public const int MaxHistory = 1500;
         /// <summary>Contracts cap monthly orders at the customer's forecast times this; the rest goes to second sources.</summary>
         public const double ContractUpside = 1.3;
@@ -147,6 +151,7 @@ namespace SiliconeTycoon.Sim
 
         static void OpenMarket(GameData d, GameState s, double year, Dictionary<string, MarketRecord> records)
         {
+            bool soldOpen = false;
             foreach (var seg in d.Segments)
             {
                 var rec = records[seg.Id];
@@ -184,6 +189,7 @@ namespace SiliconeTycoon.Sim
                     {
                         double got = Take(s, o.listing.DesignId, o.listing.Bin, want);
                         if (got <= 0) continue;
+                        soldOpen = true;
                         s.Ledger.Book(Accounts.Sales, got * o.price);
                         rec.PlayerUnits += got;
                         rec.PlayerRevenue += got * o.price;
@@ -197,6 +203,7 @@ namespace SiliconeTycoon.Sim
                     }
                 }
             }
+            if (soldOpen) AdjustRep(s, RepPerSellingMonth);
         }
 
         // ------------------------------------------------------------------ RFQs and bids
@@ -241,7 +248,9 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
-        public static string SubmitBid(GameData d, GameState s, string rfqId, string designId, string bin, double price)
+        /// <param name="maxUnits">Most chips a month you'll supply; 0 offers the customer's whole volume. A partial bid
+        /// wins only part of the order; the customer gives the rest to the next-best bidder.</param>
+        public static string SubmitBid(GameData d, GameState s, string rfqId, string designId, string bin, double price, double maxUnits = 0)
         {
             var r = FindRfq(s, rfqId);
             if (r == null) return "That request has closed.";
@@ -250,8 +259,10 @@ namespace SiliconeTycoon.Sim
             if (c.Stage == DesignStage.Draft || c.Stage == DesignStage.Cancelled) return "Start the chip's design before bidding with it.";
             string err = CheckBid(d, r, c, bin, price);
             if (err != null) return err;
+            if (maxUnits < 0) return "The volume can't be negative.";
+            if (maxUnits > 0 && maxUnits < r.EstimatedUnits * MinBidShare) return $"The customer won't split its order for fewer than {r.EstimatedUnits * MinBidShare:N0} chips a month.";
             r.Bids.RemoveAll(b => b.BidderId == Player);
-            r.Bids.Add(new Bid { BidderId = Player, DesignId = designId, Bin = bin, Price = price, SubmittedTick = s.Tick });
+            r.Bids.Add(new Bid { BidderId = Player, DesignId = designId, Bin = bin, Price = price, MaxUnits = maxUnits, SubmittedTick = s.Tick });
             return null;
         }
 
@@ -332,47 +343,61 @@ namespace SiliconeTycoon.Sim
             {
                 var cust = d.Customer(r.CustomerId);
                 var cs = CustomerOf(s, r.CustomerId);
-                Bid best = null;
-                double bestScore = OthersScore(d, s, r);
-                foreach (var b in r.Bids)
-                {
-                    double sc = Score(d, s, r, b);
-                    if (sc > bestScore) { best = b; bestScore = sc; }
-                }
                 s.Rfqs.Remove(r);
 
-                string winner = best?.BidderId ?? Others;
-                cs.SupplierId = winner;
+                // bids that beat the rest of the industry, best first; each takes what it offered until the volume is gone
+                double othersScore = OthersScore(d, s, r);
+                var ranked = r.Bids
+                    .Select(b => (bid: b, score: Score(d, s, r, b)))
+                    .Where(x => x.score > othersScore)
+                    .OrderByDescending(x => x.score)
+                    .ToList();
+                double volume = r.EstimatedUnits * ContractUpside;
+                double left = volume;
+                var awards = new List<(Bid bid, double units)>();
+                foreach (var (bid, _) in ranked)
+                {
+                    if (left <= volume * 0.001) break;
+                    double units = bid.MaxUnits > 0 ? Math.Min(bid.MaxUnits, left) : left;
+                    awards.Add((bid, units));
+                    left -= units;
+                }
+
+                cs.SupplierId = awards.Count > 0 ? awards[0].bid.BidderId : Others;
                 cs.ContractId = null;
                 cs.ContractEndMonth = r.StartMonth + r.LengthMonths - 1;
                 cs.NextRfqMonth = cs.ContractEndMonth - cust.LeadMonths - BidWindowMonths + 1;
-                if (best != null)
+                foreach (var (bid, units) in awards)
                 {
                     var k = new Contract
                     {
                         Id = s.NewId("contract"),
                         CustomerId = r.CustomerId,
-                        SupplierId = winner,
-                        DesignId = best.DesignId,
-                        Bin = best.Bin,
-                        BasePrice = best.Price,
+                        SupplierId = bid.BidderId,
+                        DesignId = bid.DesignId,
+                        Bin = bid.Bin,
+                        BasePrice = bid.Price,
                         StartMonth = r.StartMonth,
                         EndMonth = cs.ContractEndMonth,
-                        MaxMonthly = r.EstimatedUnits * ContractUpside,
+                        MaxMonthly = units,
+                        VolumeShare = volume > 0 ? units / volume : 1,
                     };
                     s.Contracts.Add(k);
-                    cs.ContractId = k.Id;
+                    if (cs.ContractId == null) cs.ContractId = k.Id;
                 }
 
+                var mine = awards.FirstOrDefault(a => a.bid.BidderId == Player);
                 bool playerBid = r.Bids.Any(b => b.BidderId == Player);
-                if (winner == Player)
+                string primary = SupplierName(s, cs.SupplierId);
+                if (mine.bid != null)
                 {
                     AdjustRep(s, 0.01);
-                    s.Log($"You win {cust.Name}'s design: about {r.EstimatedUnits:N0} chips a month (up to {r.EstimatedUnits * ContractUpside:N0}) for {r.LengthMonths} months from " +
-                          $"{Calendar.DateLabel(r.StartMonth * Calendar.WeeksPerMonth)}, at {Format.Money(best.Price)} each.", 1);
+                    string part = mine.units < volume * 0.999 ? $" ({mine.units / volume:P0} of their volume)" : "";
+                    s.Log($"You win {cust.Name}'s design{part}: up to {mine.units:N0} chips a month for {r.LengthMonths} months from " +
+                          $"{Calendar.DateLabel(r.StartMonth * Calendar.WeeksPerMonth)}, at {Format.Money(mine.bid.Price)} each.", 1);
                 }
-                else if (playerBid) s.Log($"{cust.Name} picks {SupplierName(s, winner)} over your bid.", 2);
-                else if (winner != Others) s.Log($"{cust.Name} picks {SupplierName(s, winner)} for its next product.", 0);
+                else if (playerBid) s.Log($"{cust.Name} picks {primary} over your bid.", 2);
+                else if (cs.SupplierId != Others) s.Log($"{cust.Name} picks {primary} for its next product.", 0);
             }
             s.Contracts.RemoveAll(k => k.Status != ContractStatus.Active && k.EndMonth < month - 24);
         }
@@ -393,7 +418,7 @@ namespace SiliconeTycoon.Sim
                 }
                 if (month < k.StartMonth) continue;
 
-                double ordered = cust.Active(s.Year) ? rec.Demand * cust.Share : 0;
+                double ordered = cust.Active(s.Year) ? rec.Demand * cust.Share * k.VolumeShare : 0;
                 if (k.MaxMonthly > 0) ordered = Math.Min(ordered, k.MaxMonthly);
                 double price = ContractPrice(k, month);
                 k.LastMonthOrdered = ordered;
@@ -443,9 +468,11 @@ namespace SiliconeTycoon.Sim
                 {
                     k.Status = ContractStatus.Cancelled;
                     AdjustRep(s, -0.08);
-                    cs.SupplierId = Others;
-                    cs.ContractId = null;
-                    cs.NextRfqMonth = month + 1;
+                    if (cs.ContractId == k.Id)
+                    {
+                        cs.SupplierId = Others;
+                        cs.ContractId = null;
+                    }
                     s.Log($"{cust.Name} cancels your contract after three months of missed deliveries.", 3);
                 }
             }

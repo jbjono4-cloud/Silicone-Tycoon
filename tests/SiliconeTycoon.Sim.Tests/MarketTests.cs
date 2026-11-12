@@ -158,6 +158,58 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Equal(ContractStatus.Cancelled, k.Status);
         }
 
+        static Rfq TestRfq(GameState s, double units) => new Rfq
+        {
+            Id = "rq", CustomerId = "brightline", SegmentId = "embedded", OpenMonth = s.MonthIndex, CloseMonth = s.MonthIndex,
+            StartMonth = s.MonthIndex + 1, LengthMonths = 12, MinMetric = 0.01, MaxPowerW = 5, MaxPrice = 100, ExpectedPrice = 10,
+            EstimatedUnits = units,
+        };
+
+        [Fact]
+        public void PartialBidsWinPartOfTheOrder()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            var rfq = TestRfq(s, 10000);
+            s.Rfqs.Add(rfq);
+            Assert.Contains("split", Market.SubmitBid(D, s, "rq", c.Id, "Standard", 1, 100));
+            Assert.Null(Market.SubmitBid(D, s, "rq", c.Id, "Standard", 1, 3000));
+            Simulation.AdvanceMonths(D, s, 1);
+            var k = Assert.Single(s.Contracts, x => x.SupplierId == Market.Player);
+            Assert.Equal(3000, k.MaxMonthly, 6);
+            Assert.Equal(3000 / (10000 * Market.ContractUpside), k.VolumeShare, 6);
+        }
+
+        [Fact]
+        public void SplitOrdersGoToTheNextBestBidder()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            var rfq = TestRfq(s, 10000);
+            s.Rfqs.Add(rfq);
+            Assert.Null(Market.SubmitBid(D, s, "rq", c.Id, "Standard", 1, 4000));
+            rfq.Bids.Add(new Bid { BidderId = "meridian", DesignId = c.Id, Bin = "Standard", Price = 2 });   // a weaker bid with the same chip
+            var product = new RivalProduct { Design = c, SegmentId = "embedded", ReleasedTick = s.Tick, CostReal = 0.1 };
+            Rivals.Get(s, "meridian").Products.Add(product);
+            Simulation.AdvanceMonths(D, s, 1);
+            var mine = Assert.Single(s.Contracts, x => x.SupplierId == Market.Player);
+            var theirs = Assert.Single(s.Contracts, x => x.SupplierId == "meridian" && x.CustomerId == "brightline");
+            Assert.Equal(4000, mine.MaxMonthly, 6);
+            Assert.Equal(10000 * Market.ContractUpside - 4000, theirs.MaxMonthly, 6);
+            Assert.Equal(Market.Player, Market.CustomerOf(s, "brightline").SupplierId);
+        }
+
+        [Fact]
+        public void SellingThroughDistributorsBuildsReputation()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            Market.AddStock(s, c.Id, "Standard", 1e8);
+            Market.SetListing(s, c.Id, "Standard", Market.ExpectedPrice(D.Segment("embedded"), s.YearF));
+            Simulation.AdvanceMonths(D, s, 12);
+            Assert.True(s.Rep >= Market.RepPerSellingMonth * 11);
+        }
+
         [Fact]
         public void ContractsCapMonthlyOrders()
         {

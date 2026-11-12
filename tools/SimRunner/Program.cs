@@ -94,10 +94,17 @@ while (s.Tick < endTick && !s.GameOver)
                 .Where(c => c.Stats != null && c.Stage != DesignStage.Draft && c.Stage != DesignStage.Cancelled)
                 .Select(c => (chip: c, price: Math.Min(rfq.MaxPrice, Math.Max(CostOf(c) * 1.3, rfq.ExpectedPrice * 0.85))))
                 .Where(o => Market.CheckBid(d, rfq, o.chip, Bin(o.chip), o.price) == null && o.price >= CostOf(o.chip))
-                .Where(o => Committed(o.chip.NodeId) + rfq.EstimatedUnits * Market.ContractUpside <= CanMake(o.chip))   // only promise what we can make
+                .Select(o => (o.chip, o.price, spare: CanMake(o.chip) - Committed(o.chip.NodeId)))
+                .Where(o => o.spare >= rfq.EstimatedUnits * Market.MinBidShare)   // only promise what we can make
                 .OrderByDescending(o => Market.Perf(o.chip, Bin(o.chip), seg.Metric))
                 .ToList();
-            if (options.Count > 0) Market.SubmitBid(d, s, rfq.Id, options[0].chip.Id, Bin(options[0].chip), options[0].price);
+            if (options.Count > 0)
+            {
+                var o = options[0];
+                double whole = rfq.EstimatedUnits * Market.ContractUpside;
+                double offer = o.spare >= whole ? 0 : Math.Floor(o.spare);   // 0 = take the whole order
+                Fail(Market.SubmitBid(d, s, rfq.Id, o.chip.Id, Bin(o.chip), o.price, offer));
+            }
         }
 
         // each producing fab makes the chip on its node with the biggest contract orders, else the newest; idle chips get test wafers

@@ -25,6 +25,8 @@ namespace SiliconeTycoon.Sim
         public string DesignId;
         public string Bin;
         public double Price;
+        /// <summary>Most chips a month the bidder offers to supply. 0 = the customer's whole volume.</summary>
+        public double MaxUnits;
         public int SubmittedTick;
     }
 
@@ -64,8 +66,10 @@ namespace SiliconeTycoon.Sim
         public ContractStatus Status = ContractStatus.Active;
         /// <summary>Consecutive months with more than half the order missing.</summary>
         public int ShortMonths;
-        /// <summary>Most the customer orders in a month (its forecast plus upside); above that it second-sources. 0 = no cap.</summary>
+        /// <summary>Most the customer orders in a month from this supplier; above that it second-sources. 0 = no cap.</summary>
         public double MaxMonthly;
+        /// <summary>Share of the customer's volume this contract covers (less than 1 when the order was split between suppliers).</summary>
+        public double VolumeShare = 1;
         public double Delivered;
         public double Shortfall;
         public double LastMonthOrdered;
