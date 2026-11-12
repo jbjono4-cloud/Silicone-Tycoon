@@ -37,7 +37,7 @@ namespace SiliconeTycoon.Sim
         public const int MaxEngineers = 500;
 
         /// <summary>Transistors one engineer can design and verify in a month; design tools improve it every year.</summary>
-        public static double Productivity(double year) => 60 * Math.Pow(1.22, Math.Max(0, year - 1970));
+        public static double Productivity(double year) => 90 * Math.Pow(1.22, Math.Max(0, year - 1970));
 
         public static double BaseEngineerMonths(ChipDesign c, DesignStats st, double year) =>
             st.Transistors * (1 + c.Verification) / Productivity(year);

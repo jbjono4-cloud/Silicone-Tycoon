@@ -105,7 +105,8 @@ namespace SiliconeTycoon.UI
             box.AddChild(nameEdit);
 
             box.AddChild(Ui.Heading("Start"));
-            box.AddChild(Ui.Wrap("Campaign: January 1970, a newly founded company with $3M (1970 dollars), a small design team and the 10 µm process. " +
+            var defaults = new NewGameOptions();
+            box.AddChild(Ui.Wrap($"Campaign: January 1970, a newly founded company with {Format.Big(defaults.StartingCash)}, {defaults.StartingEngineers} design engineers and the 10 µm process. " +
                                  "Meridian Integrated and Kestrel Devices are already in the business.", 14));
 
             var seedRow = Ui.H(10);

@@ -60,7 +60,7 @@ namespace SiliconeTycoon.Sim.Tests
         {
             var small = TestData.NewGame();
             var big = TestData.NewGame();
-            DesignOps.SetEngineers(big, big.DesignTeams[0], 12);
+            DesignOps.SetEngineers(big, big.DesignTeams[0], 16);
             var a = Chip();
             var b = Chip();
             DesignOps.StartDesign(D, small, a, small.DesignTeams[0].Id);

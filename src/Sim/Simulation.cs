@@ -10,11 +10,11 @@ namespace SiliconeTycoon.Sim
         public ulong Seed = 1;
         public int StartYear = Calendar.StartYear;
         /// <summary>Starting cash in 1970 dollars.</summary>
-        public double StartingCash = 3_000_000;
+        public double StartingCash = 6_000_000;
         /// <summary>Processes the company starts with. Null = every node in production by the start year.</summary>
         public List<string> NodesReady;
         /// <summary>Engineers in the starting design team.</summary>
-        public int StartingEngineers = 4;
+        public int StartingEngineers = 6;
     }
 
     /// <summary>The weekly simulation loop.</summary>
