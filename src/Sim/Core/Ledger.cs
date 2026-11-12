@@ -20,6 +20,7 @@ namespace SiliconeTycoon.Sim
         public const string MaskSets = "Mask sets";
         public const string DesignHouse = "Design house fees";
         public const string Penalties = "Contract penalties";
+        public const string FabClosure = "Fab closures";
     }
 
     public class Loan

@@ -138,6 +138,28 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void ClosingAFabStopsItsCostsAndWritesItOff()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            Simulation.AdvanceWeeks(D, s, BuildWeeks + 8);
+            double book = f.BookValue;
+            double cash = s.Cash;
+            Assert.Null(FabOps.Close(D, s, f));
+            Assert.Equal(FabStage.Closed, f.Stage);
+            Assert.Equal(cash + book * FabOps.SalvageShare, s.Cash, 4);
+            Assert.Equal(-book * (1 - FabOps.SalvageShare), s.Ledger.Current[Accounts.FabClosure], 4);
+            Assert.DoesNotContain(f.Lots, l => !l.Done);
+            Assert.NotNull(FabOps.Close(D, s, f));
+
+            Simulation.AdvanceMonths(D, s, 2);
+            var lines = s.Ledger.LastMonth.Lines;
+            Assert.False(lines.ContainsKey(Accounts.FabRunning));
+            Assert.False(lines.ContainsKey(Accounts.Depreciation));
+            Assert.Equal(0, FabOps.AvailableCapacity(D, f));
+        }
+
+        [Fact]
         public void RunningCostsAppearOnceProducing()
         {
             var s = TestData.NewGame();

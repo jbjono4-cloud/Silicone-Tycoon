@@ -143,9 +143,15 @@ while (s.Tick < endTick && !s.GameOver)
             && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && Spendable() > next.ResearchCost * s.Inflation)
             Fail(ProcessResearch.Start(d, s, next.Id));
 
-        // a fab on each new node, once it can be funded
-        if (!building && !s.Fabs.Any(f => f.NodeId == best))
-            foreach (int size in new[] { 1000, 500 })   // the biggest fab it can fund
+        // a fab on each new node, once it can be funded, sized to what we sell (1,000 wafers for the first)
+        double avgSales = s.MarketHistory.Where(r => r.Month >= s.MonthIndex - 3).Sum(r => r.PlayerUnits) / 3
+                          + s.Contracts.Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active).Sum(k => k.LastMonthOrdered);
+        var bestNode = d.Node(best);
+        double goodPerWafer = YieldModel.DiesPerWafer(bestNode.WaferMm, YieldModel.WithScribe(20))
+                              * YieldModel.Yield(LearningCurve.D0(bestNode, DesignLab.EstimateLearning), 20);
+        int wanted = avgSales <= 0 ? 1000 : (int)Math.Clamp(Math.Ceiling(avgSales * 1.3 / goodPerWafer / 100) * 100, 300, 1000);
+        if (!building && !s.Fabs.Any(f => f.NodeId == best && f.Stage != FabStage.Closed))
+            foreach (int size in new[] { wanted, Math.Max(300, wanted / 2) })   // the size it wants, else half that
             {
                 var q = FabOps.Quote(d, s, best, CheapestSite(), size);
                 if (q.Problem != null || Spendable() <= q.NetCapex) continue;
@@ -155,8 +161,8 @@ while (s.Tick < endTick && !s.GameOver)
                 break;
             }
 
-        // sold out on the newest node: add another fab there
-        var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Producing).ToList();
+        // sold out on the newest node: add another fab there (fabs still ramping don't count)
+        var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Stage == FabStage.Running).ToList();
         if (!building && bestFabs.Count > 0 && bestFabs.All(f => f.LastUtilisation > 0.9) && stock < Math.Max(monthlyOrders, lastSales) * 0.5)
         {
             var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
@@ -167,14 +173,17 @@ while (s.Tick < endTick && !s.GameOver)
             }
         }
 
-        // old fabs whose chips no longer sell: stop starting wafers (test wafers only)
-        foreach (var f in s.Fabs.Where(f => f.Producing && f.NodeId != best))
+        // old fabs whose chips no longer sell: close them once a newer fab is producing
+        bool newerProducing = s.Fabs.Any(f => f.NodeId == FabNode() && f.Producing);
+        foreach (var f in s.Fabs.Where(f => f.Producing && f.NodeId != FabNode()).ToList())
         {
+            if (!newerProducing) break;
             var chip = s.Design(f.DesignId);
-            if (chip == null) continue;
-            bool selling = soldLastMonth > 0 && s.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.Units) < 6 * soldLastMonth;
-            bool contracted = s.Contracts.Any(k => k.DesignId == chip.Id && k.Status == ContractStatus.Active);
-            if (!selling && !contracted) FabOps.SetPlannedStarts(f, 0);
+            double onHand = chip == null ? 0 : s.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.Units);
+            bool selling = chip != null && soldLastMonth > 0 && onHand < 6 * soldLastMonth
+                           && s.MarketHistory.Any(r => r.Month == s.MonthIndex - 1 && r.PlayerUnits > 0);
+            bool contracted = chip != null && s.Contracts.Any(k => k.DesignId == chip.Id && k.Status == ContractStatus.Active);
+            if (!selling && !contracted) Fail(FabOps.Close(d, s, f));
         }
 
         // stay solvent: borrow when cash runs low, repay when flush

@@ -95,6 +95,8 @@ namespace SiliconeTycoon.Sim
         public const int DepreciationMonths = 60;
         /// <summary>Monthly running cost (staff, power, maintenance) as a share of capex, before location factors.</summary>
         public const double RunningShare = 0.009;
+        /// <summary>Share of a closed fab's remaining value recovered by selling its equipment.</summary>
+        public const double SalvageShare = 0.15;
         public const int MinCapacity = 100;
         public const int MaxCapacity = 200000;
         /// <summary>How many dies of a lot are simulated individually; the result is scaled to the lot.</summary>
@@ -199,6 +201,27 @@ namespace SiliconeTycoon.Sim
             f.DesignId = c.Id;
             f.DieAreaMm2 = c.DieAreaMm2;
             s.Log($"{f.Name} switches production to the {c.Name}.", 0);
+            return null;
+        }
+
+        /// <summary>
+        /// Closes a fab for good: running and engineering costs stop, wafers in progress are scrapped, the equipment is sold
+        /// for <see cref="SalvageShare"/> of its remaining value and the rest is written off. Works on a fab under construction too.
+        /// </summary>
+        public static string Close(GameData d, GameState s, Fab f)
+        {
+            if (f.Stage == FabStage.Closed) return $"{f.Name} is already closed.";
+            double value = f.Stage == FabStage.Construction ? f.CapexPaid : f.BookValue;
+            double salvage = value * SalvageShare;
+            s.Ledger.Cash += salvage;
+            if (value - salvage > 0) s.Ledger.Accrue(Accounts.FabClosure, -(value - salvage));
+            f.Stage = FabStage.Closed;
+            f.BookValue = 0;
+            f.MonthlyDepreciation = 0;
+            f.PlannedStarts = 0;
+            f.DesignId = null;
+            f.Lots.RemoveAll(l => !l.Done);
+            s.Log($"{f.Name} closes. The equipment sells for {Format.Big(salvage)}; {Format.Big(value - salvage)} is written off.", 2);
             return null;
         }
 
