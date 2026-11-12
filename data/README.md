@@ -1,0 +1,28 @@
+# Game data
+
+Plain JSON, loaded by `GameData.FromJson` / `GameData.FromFolder`. Keep these files comment-free: Godot's JSON importer rejects comments.
+
+All values are **game-tuning approximations**, not sourced historical figures. Money is in **1970 dollars**; the sim multiplies by `Calendar.Inflation(year)` when it charges anything.
+
+## nodes.json
+
+| Field | Meaning |
+| --- | --- |
+| `FeatureNm` | Feature size in nanometres |
+| `Year` | Year the node reaches production historically; research can start up to about two years earlier |
+| `Requires` | Previous node that must be ready first |
+| `LogicDensity`, `SramDensity` | Transistors per mm² |
+| `MaxClockMHz`, `Voltage` | Speed ceiling and supply voltage |
+| `WaferMm` | Wafer diameter |
+| `WaferCost` | Materials per wafer start |
+| `MaskSetCost` | One full mask set (used from milestone 2) |
+| `CycleWeeks` | Wafer start to finished wafer |
+| `D0Launch`, `D0Mature` | Defects per cm² when new and when mature |
+| `LearningMonths` | Time constant of the learning curve at normal volume |
+| `FabCostPer1000` | Capex for 1,000 wafer starts a month (scales with capacity^0.85) |
+| `BuildMonths`, `RampMonths` | Construction and ramp times |
+| `ResearchCost`, `ResearchMonths`, `SlipRisk` | Process research budget, planned length and chance of slipping at 1× budget |
+
+## locations.json
+
+Indexes are relative to the United States = 1.0. `Subsidy` is the share of fab capex paid by grants. `QuakeRisk` and `PoliticalRisk` are annual disruption chances (used once events arrive in milestone 6). `From`/`To` limit the years you can build there.

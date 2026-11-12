@@ -1,0 +1,58 @@
+[
+  {
+    "Id": "n10um", "Name": "10 µm", "FeatureNm": 10000, "Year": 1970, "Requires": null,
+    "LogicDensity": 190, "SramDensity": 450, "MaxClockMHz": 1.0, "Voltage": 15,
+    "WaferMm": 51, "WaferCost": 40, "MaskSetCost": 8000, "CycleWeeks": 6,
+    "D0Launch": 15, "D0Mature": 4, "LearningMonths": 18,
+    "FabCostPer1000": 4000000, "BuildMonths": 12, "RampMonths": 9,
+    "ResearchCost": 0, "ResearchMonths": 0, "SlipRisk": 0
+  },
+  {
+    "Id": "n8um", "Name": "8 µm", "FeatureNm": 8000, "Year": 1972, "Requires": "n10um",
+    "LogicDensity": 250, "SramDensity": 600, "MaxClockMHz": 2.0, "Voltage": 12,
+    "WaferMm": 76, "WaferCost": 55, "MaskSetCost": 10000, "CycleWeeks": 6,
+    "D0Launch": 13, "D0Mature": 3.5, "LearningMonths": 18,
+    "FabCostPer1000": 5000000, "BuildMonths": 12, "RampMonths": 9,
+    "ResearchCost": 1200000, "ResearchMonths": 18, "SlipRisk": 0.15
+  },
+  {
+    "Id": "n6um", "Name": "6 µm", "FeatureNm": 6000, "Year": 1974, "Requires": "n8um",
+    "LogicDensity": 350, "SramDensity": 850, "MaxClockMHz": 3.0, "Voltage": 12,
+    "WaferMm": 76, "WaferCost": 65, "MaskSetCost": 12000, "CycleWeeks": 7,
+    "D0Launch": 12, "D0Mature": 3.0, "LearningMonths": 18,
+    "FabCostPer1000": 6000000, "BuildMonths": 15, "RampMonths": 10,
+    "ResearchCost": 2000000, "ResearchMonths": 20, "SlipRisk": 0.20
+  },
+  {
+    "Id": "n5um", "Name": "5 µm", "FeatureNm": 5000, "Year": 1976, "Requires": "n6um",
+    "LogicDensity": 500, "SramDensity": 1200, "MaxClockMHz": 5.0, "Voltage": 5,
+    "WaferMm": 100, "WaferCost": 90, "MaskSetCost": 15000, "CycleWeeks": 7,
+    "D0Launch": 10, "D0Mature": 2.5, "LearningMonths": 20,
+    "FabCostPer1000": 8000000, "BuildMonths": 15, "RampMonths": 10,
+    "ResearchCost": 3000000, "ResearchMonths": 22, "SlipRisk": 0.20
+  },
+  {
+    "Id": "n3um", "Name": "3 µm", "FeatureNm": 3000, "Year": 1979, "Requires": "n5um",
+    "LogicDensity": 900, "SramDensity": 2200, "MaxClockMHz": 8.0, "Voltage": 5,
+    "WaferMm": 100, "WaferCost": 110, "MaskSetCost": 20000, "CycleWeeks": 8,
+    "D0Launch": 9, "D0Mature": 2.0, "LearningMonths": 20,
+    "FabCostPer1000": 12000000, "BuildMonths": 18, "RampMonths": 12,
+    "ResearchCost": 5000000, "ResearchMonths": 24, "SlipRisk": 0.25
+  },
+  {
+    "Id": "n2um", "Name": "2 µm", "FeatureNm": 2000, "Year": 1982, "Requires": "n3um",
+    "LogicDensity": 1600, "SramDensity": 3800, "MaxClockMHz": 12.0, "Voltage": 5,
+    "WaferMm": 125, "WaferCost": 150, "MaskSetCost": 30000, "CycleWeeks": 8,
+    "D0Launch": 8, "D0Mature": 1.6, "LearningMonths": 22,
+    "FabCostPer1000": 20000000, "BuildMonths": 18, "RampMonths": 12,
+    "ResearchCost": 9000000, "ResearchMonths": 24, "SlipRisk": 0.30
+  },
+  {
+    "Id": "n1_5um", "Name": "1.5 µm", "FeatureNm": 1500, "Year": 1985, "Requires": "n2um",
+    "LogicDensity": 2700, "SramDensity": 6500, "MaxClockMHz": 16.0, "Voltage": 5,
+    "WaferMm": 150, "WaferCost": 200, "MaskSetCost": 45000, "CycleWeeks": 9,
+    "D0Launch": 7, "D0Mature": 1.3, "LearningMonths": 22,
+    "FabCostPer1000": 35000000, "BuildMonths": 20, "RampMonths": 14,
+    "ResearchCost": 15000000, "ResearchMonths": 26, "SlipRisk": 0.30
+  }
+]

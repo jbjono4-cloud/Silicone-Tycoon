@@ -1,0 +1,15 @@
+# Godot
+.godot/
+.import/
+export_presets.cfg
+*.translation
+
+# .NET
+.mono/
+bin/
+obj/
+TestResults/
+*.user
+.vs/
+.vscode/
+.idea/

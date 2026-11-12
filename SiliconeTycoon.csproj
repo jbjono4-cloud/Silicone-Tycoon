@@ -1,0 +1,16 @@
+<Project Sdk="Godot.NET.Sdk/4.7.0">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>SiliconeTycoon</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <!-- The test project and the headless runner have their own .csproj files; keep them out of the game build. -->
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+    <Compile Remove="tools/**" />
+    <None Remove="tests/**" />
+    <None Remove="tools/**" />
+  </ItemGroup>
+</Project>

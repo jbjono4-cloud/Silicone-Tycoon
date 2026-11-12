@@ -1,0 +1,15 @@
+[
+  { "Id": "us_ca", "Name": "California, United States", "Region": "North America", "From": 1970, "LabourIndex": 1.0,  "PowerIndex": 1.0, "Subsidy": 0.0,  "QuakeRisk": 0.020, "PoliticalRisk": 0.0 },
+  { "Id": "us_tx", "Name": "Texas, United States",      "Region": "North America", "From": 1970, "LabourIndex": 0.9,  "PowerIndex": 0.8, "Subsidy": 0.02, "QuakeRisk": 0.0,   "PoliticalRisk": 0.0 },
+  { "Id": "us_or", "Name": "Oregon, United States",     "Region": "North America", "From": 1970, "LabourIndex": 0.95, "PowerIndex": 0.7, "Subsidy": 0.03, "QuakeRisk": 0.005, "PoliticalRisk": 0.0 },
+  { "Id": "jp",    "Name": "Japan",                     "Region": "East Asia",     "From": 1970, "LabourIndex": 0.7,  "PowerIndex": 1.3, "Subsidy": 0.05, "QuakeRisk": 0.030, "PoliticalRisk": 0.0 },
+  { "Id": "kr",    "Name": "South Korea",               "Region": "East Asia",     "From": 1974, "LabourIndex": 0.3,  "PowerIndex": 0.9, "Subsidy": 0.15, "QuakeRisk": 0.0,   "PoliticalRisk": 0.02 },
+  { "Id": "tw",    "Name": "Taiwan",                    "Region": "East Asia",     "From": 1976, "LabourIndex": 0.3,  "PowerIndex": 0.8, "Subsidy": 0.15, "QuakeRisk": 0.030, "PoliticalRisk": 0.03 },
+  { "Id": "sg",    "Name": "Singapore",                 "Region": "Southeast Asia","From": 1970, "LabourIndex": 0.35, "PowerIndex": 1.0, "Subsidy": 0.12, "QuakeRisk": 0.0,   "PoliticalRisk": 0.0 },
+  { "Id": "my",    "Name": "Penang, Malaysia",          "Region": "Southeast Asia","From": 1972, "LabourIndex": 0.2,  "PowerIndex": 0.8, "Subsidy": 0.10, "QuakeRisk": 0.0,   "PoliticalRisk": 0.01 },
+  { "Id": "ie",    "Name": "Ireland",                   "Region": "Europe",        "From": 1970, "LabourIndex": 0.7,  "PowerIndex": 1.1, "Subsidy": 0.12, "QuakeRisk": 0.0,   "PoliticalRisk": 0.0 },
+  { "Id": "gb",    "Name": "Scotland, United Kingdom",  "Region": "Europe",        "From": 1970, "LabourIndex": 0.8,  "PowerIndex": 1.1, "Subsidy": 0.08, "QuakeRisk": 0.0,   "PoliticalRisk": 0.0 },
+  { "Id": "de",    "Name": "Germany",                   "Region": "Europe",        "From": 1970, "LabourIndex": 1.1,  "PowerIndex": 1.3, "Subsidy": 0.10, "QuakeRisk": 0.0,   "PoliticalRisk": 0.0 },
+  { "Id": "il",    "Name": "Israel",                    "Region": "Middle East",   "From": 1974, "LabourIndex": 0.7,  "PowerIndex": 1.0, "Subsidy": 0.15, "QuakeRisk": 0.005, "PoliticalRisk": 0.04 },
+  { "Id": "cn",    "Name": "China",                     "Region": "East Asia",     "From": 1985, "LabourIndex": 0.15, "PowerIndex": 0.7, "Subsidy": 0.25, "QuakeRisk": 0.005, "PoliticalRisk": 0.05 }
+]
