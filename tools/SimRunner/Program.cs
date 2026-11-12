@@ -21,6 +21,8 @@ var team = s.DesignTeams[0];
 var segmentOf = new Dictionary<string, string>();   // our chip id -> segment it was planned for
 
 string Best() => d.Nodes.Where(n => s.NodeReady(n.Id)).OrderBy(n => n.FeatureNm).First().Id;
+// Newest node the company has a fab for (built or building): new chips are designed for it.
+string FabNode() => s.Fabs.Where(f => f.Stage != FabStage.Closed).Select(f => d.Node(f.NodeId)).OrderBy(n => n.FeatureNm).First().Id;
 // Money the company can reach (cash plus what the bank will still lend), less six months of running costs kept in reserve.
 double Spendable() => s.Cash + Finance.Headroom(s) - 6 * (s.Ledger.LastMonth?.Costs ?? 0);
 // Make sure enough cash is on hand for a payment, borrowing the difference.
@@ -34,9 +36,10 @@ double CostOf(ChipDesign c) => c.Stats.CostPerGoodDie / Calendar.Inflation(Calen
 string Bin(ChipDesign c) => Binning.BinsFor(c)[0].Name;
 
 // Chips a month the company can make of a design: its node's fab capacity (built or building) × dies per wafer × yield.
-double CanMake(ChipDesign c) =>
-    s.Fabs.Where(f => f.NodeId == c.NodeId && f.Stage != FabStage.Closed).Sum(f => f.Capacity)
-    * c.Stats.DiesPerWafer * c.Stats.YieldEstimate;
+// Counts only fabs producing now, at today's yield, with a 15% safety margin.
+double CanMake(ChipDesign c) => 0.85 * s.Fabs
+    .Where(f => f.NodeId == c.NodeId && f.Producing)
+    .Sum(f => FabOps.AvailableCapacity(d, f) * c.Stats.DiesPerWafer * YieldModel.Yield(FabOps.D0(d, f), c.DieAreaMm2));
 // Chips a month already promised on a node, at each contract's cap.
 double Committed(string nodeId) => s.Contracts
     .Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active && s.Design(k.DesignId)?.NodeId == nodeId)
@@ -46,7 +49,7 @@ void Fail(string err) { if (err != null) Console.WriteLine($"  ! {Calendar.DateL
 
 bool StartChip(SegmentDef seg)
 {
-    var c = DesignLab.PlanForSegment(d, s, Best(), seg.Metric, $"RS-{s.Designs.Count + 1}", maxPowerW: seg.MaxPowerW);
+    var c = DesignLab.PlanForSegment(d, s, FabNode(), seg.Metric, $"RS-{s.Designs.Count + 1}", maxPowerW: seg.MaxPowerW);
     if (c == null) return false;
     string err = DesignOps.StartDesign(d, s, c, team.Id);
     Fail(err);
@@ -129,13 +132,14 @@ while (s.Tick < endTick && !s.GameOver)
         if (team.ProjectId == null)
             foreach (var seg in d.Segments.Where(x => x.Active(s.YearF)))
             {
-                bool have = s.Designs.Any(c => c.NodeId == best && c.Stage != DesignStage.Cancelled && segmentOf.GetValueOrDefault(c.Id) == seg.Id);
+                bool have = s.Designs.Any(c => c.NodeId == FabNode() && c.Stage != DesignStage.Cancelled && segmentOf.GetValueOrDefault(c.Id) == seg.Id);
                 if (!have && StartChip(seg)) break;
             }
 
         // the node race, one programme at a time, whenever it can be funded
+        // (only once the newest node has a fab, so research never runs two nodes ahead of production)
         var next = d.Nodes.FirstOrDefault(n => n.Requires == best && !s.NodeReady(n.Id));
-        if (next != null && !s.NodePrograms.Any(p => !p.Done)
+        if (next != null && FabNode() == best && !s.NodePrograms.Any(p => !p.Done)
             && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && Spendable() > next.ResearchCost * s.Inflation)
             Fail(ProcessResearch.Start(d, s, next.Id));
 
