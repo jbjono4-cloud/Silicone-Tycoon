@@ -25,7 +25,7 @@ namespace SiliconeTycoon.Sim
 
         public static double LoanLimit(GameState s)
         {
-            double collateral = s.Fabs.Sum(f => f.Stage == FabStage.Construction ? f.CapexPaid : f.BookValue);
+            double collateral = s.Fabs.Sum(f => f.Stage == FabStage.Construction ? f.CapexPaid + f.BookValue : f.BookValue);
             double limit = Math.Max(3_000_000 * s.Inflation, 12 * s.Ledger.AverageRevenue(3)) + 0.7 * collateral;
             return limit * Math.Max(0.3, 0.75 + 0.35 * s.Rep);
         }

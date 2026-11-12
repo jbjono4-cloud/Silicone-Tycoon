@@ -150,6 +150,19 @@ while (s.Tick < endTick && !s.GameOver)
         double goodPerWafer = YieldModel.DiesPerWafer(bestNode.WaferMm, YieldModel.WithScribe(20))
                               * YieldModel.Yield(LearningCurve.D0(bestNode, DesignLab.EstimateLearning), 20);
         int wanted = avgSales <= 0 ? 1000 : (int)Math.Clamp(Math.Ceiling(avgSales * 1.3 / goodPerWafer / 100) * 100, 300, 1000);
+        // with two or more fabs producing, retool the oldest instead of building (cheaper, and it was falling behind anyway)
+        var producing = s.Fabs.Where(f => f.Producing).OrderByDescending(f => d.Node(f.NodeId).FeatureNm).ToList();
+        if (!building && !s.Fabs.Any(f => f.NodeId == best && f.Stage != FabStage.Closed) && producing.Count >= 2)
+        {
+            var oldest = producing[0];
+            var q = FabOps.RetoolQuote(d, s, oldest, best);
+            if (q.Problem == null && Spendable() > q.NetCapex)
+            {
+                EnsureCash(q.NetCapex / q.BuildMonths * 2);
+                Fail(FabOps.Retool(d, s, oldest, best));
+                building = true;
+            }
+        }
         if (!building && !s.Fabs.Any(f => f.NodeId == best && f.Stage != FabStage.Closed))
             foreach (int size in new[] { wanted, Math.Max(300, wanted / 2) })   // the size it wants, else half that
             {

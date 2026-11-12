@@ -159,6 +159,61 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Equal(0, FabOps.AvailableCapacity(D, f));
         }
 
+        static GameState WithNodes(params string[] nodes) =>
+            Simulation.NewGame(D, new NewGameOptions { StartingCash = 50_000_000, NodesReady = new System.Collections.Generic.List<string>(nodes) });
+
+        [Fact]
+        public void RetoolingCostsLessAndTakesLessTimeThanANewFab()
+        {
+            var s = WithNodes("n10um", "n8um", "n6um");
+            var f = Build(s);
+            Simulation.AdvanceWeeks(D, s, BuildWeeks);
+            var fresh = FabOps.Quote(D, s, "n6um", f.LocationId, f.Capacity);
+            var retool = FabOps.RetoolQuote(D, s, f, "n6um");
+            Assert.Null(retool.Problem);
+            Assert.True(retool.NetCapex < fresh.NetCapex * 0.75);
+            Assert.True(retool.BuildMonths < fresh.BuildMonths);
+            Assert.True(FabOps.RetoolQuote(D, s, f, "n8um").NetCapex < retool.NetCapex);   // an older target node costs less
+        }
+
+        [Fact]
+        public void RetoolingNeedsANewerNodeAndAWorkingFab()
+        {
+            var s = WithNodes("n10um", "n8um");
+            var f = Build(s, node: "n8um");
+            Assert.Contains("already being built", FabOps.RetoolQuote(D, s, f, "n8um").Problem ?? FabOps.Retool(D, s, f, "n8um"));
+            Simulation.AdvanceWeeks(D, s, BuildWeeks + 4);
+            Assert.Contains("newer node", FabOps.Retool(D, s, f, "n10um"));
+            Assert.Contains("isn't ready", FabOps.Retool(D, s, f, "n6um"));
+        }
+
+        [Fact]
+        public void RetoolingSwitchesNodeAndRestartsLearning()
+        {
+            var s = WithNodes("n10um", "n8um");
+            var f = Build(s);
+            Simulation.AdvanceMonths(D, s, 30);
+            Assert.Equal(FabStage.Running, f.Stage);
+            Assert.True(f.Learning > 5);
+            double book = f.BookValue;
+            var q = FabOps.RetoolQuote(D, s, f, "n8um");
+
+            Assert.Null(FabOps.Retool(D, s, f, "n8um"));
+            Assert.Equal("n8um", f.NodeId);
+            Assert.Equal(FabStage.Construction, f.Stage);
+            Assert.True(f.Retooling);
+            Assert.Equal(0, f.Learning);
+            Assert.Equal(0, FabOps.AvailableCapacity(D, f));
+            Assert.Equal(-book * FabOps.RetoolWriteOff, s.Ledger.Current[Accounts.Retooling], 4);
+
+            Simulation.AdvanceWeeks(D, s, q.BuildMonths * Calendar.WeeksPerMonth);
+            Assert.Equal(FabStage.Ramping, f.Stage);
+            Assert.False(f.Retooling);
+            Assert.Equal(q.NetCapex, f.CapexPaid, 2);
+            Assert.True(f.BookValue > q.NetCapex);   // new equipment plus what's left of the old
+            Assert.Equal(D.Node("n8um").D0Launch, FabOps.D0(D, f), 1);
+        }
+
         [Fact]
         public void RunningCostsAppearOnceProducing()
         {

@@ -47,6 +47,10 @@ namespace SiliconeTycoon.Sim
         public double CapexReal;
         public double CapexPaid;
         public int BuildWeeksTotal;
+        /// <summary>True while an existing fab is being re-equipped for a newer node.</summary>
+        public bool Retooling;
+        /// <summary>Times this fab has been retooled.</summary>
+        public int Retools;
         public int BuildWeeksLeft;
         public int OrderedTick;
 
@@ -97,6 +101,14 @@ namespace SiliconeTycoon.Sim
         public const double RunningShare = 0.009;
         /// <summary>Share of a closed fab's remaining value recovered by selling its equipment.</summary>
         public const double SalvageShare = 0.15;
+        /// <summary>Retooling cost as a share of a new fab of the same size on the new node.</summary>
+        public const double RetoolShare = 0.55;
+        /// <summary>Extra share when the new node uses bigger wafers (all wafer-handling tools change).</summary>
+        public const double RetoolWaferChangeShare = 0.15;
+        /// <summary>Downtime as a share of the new node's normal build time.</summary>
+        public const double RetoolTimeShare = 0.6;
+        /// <summary>Share of the old equipment's remaining value written off when it's replaced.</summary>
+        public const double RetoolWriteOff = 0.7;
         public const int MinCapacity = 100;
         public const int MaxCapacity = 200000;
         /// <summary>How many dies of a lot are simulated individually; the result is scaled to the lot.</summary>
@@ -204,6 +216,75 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
+        /// <summary>What re-equipping a fab for a newer node would cost and how long it would be down.</summary>
+        public static FabQuote RetoolQuote(GameData d, GameState s, Fab f, string nodeId)
+        {
+            var n = d.Node(nodeId);
+            var old = d.Node(f.NodeId);
+            var fresh = Quote(d, s, nodeId, f.LocationId, f.Capacity);
+            var q = new FabQuote
+            {
+                Capex = fresh.Capex,
+                Subsidy = fresh.Subsidy,
+                MonthlyRunning = fresh.MonthlyRunning,
+                WaferCost = fresh.WaferCost,
+                RecommendedEngineering = fresh.RecommendedEngineering,
+                RampMonths = fresh.RampMonths,
+                Problem = fresh.Problem,
+            };
+            if (n == null) { q.Problem = "Unknown process."; return q; }
+            double share = RetoolShare + (n.WaferMm > old.WaferMm ? RetoolWaferChangeShare : 0);
+            q.NetCapex = fresh.NetCapex * share;
+            q.BuildMonths = Math.Max(1, (int)Math.Ceiling(n.BuildMonths * RetoolTimeShare));
+            if (q.Problem != null) return q;
+            if (f.Stage == FabStage.Closed) q.Problem = $"{f.Name} is closed.";
+            else if (f.Stage == FabStage.Construction) q.Problem = $"{f.Name} is already being built or retooled.";
+            else if (n.FeatureNm >= old.FeatureNm) q.Problem = $"{f.Name} already runs {old.Name}; retool it to a newer node.";
+            return q;
+        }
+
+        /// <summary>
+        /// Re-equips a fab for a newer node: cheaper and quicker than a new fab, but the fab makes nothing until it's back
+        /// up, most of the old equipment's value is written off, wafers in progress are scrapped and the process learning
+        /// starts again from the new node's launch defect density.
+        /// </summary>
+        public static string Retool(GameData d, GameState s, Fab f, string nodeId)
+        {
+            var q = RetoolQuote(d, s, f, nodeId);
+            if (q.Problem != null) return q.Problem;
+            double firstPayment = q.NetCapex / q.BuildMonths;
+            if (s.Cash < firstPayment) return $"You need at least {Format.Money(firstPayment)} for the first month of retooling.";
+
+            var old = d.Node(f.NodeId);
+            var n = d.Node(nodeId);
+            double writeOff = f.BookValue * RetoolWriteOff;
+            if (writeOff > 0) s.Ledger.Accrue(Accounts.Retooling, -writeOff);
+            f.BookValue -= writeOff;
+            f.MonthlyDepreciation = 0;
+            f.Lots.RemoveAll(l => !l.Done);
+            f.NodeId = nodeId;
+            f.DesignId = null;
+            f.DieAreaMm2 = 10;
+            f.Stage = FabStage.Construction;
+            f.Retooling = true;
+            f.Retools++;
+            f.Capex = q.NetCapex;
+            f.CapexPaid = 0;
+            f.CapexReal = (q.Capex - q.Subsidy) / s.Inflation;   // running costs follow the new equipment, like a new fab's
+            f.BuildWeeksTotal = q.BuildMonths * Calendar.WeeksPerMonth;
+            f.BuildWeeksLeft = f.BuildWeeksTotal;
+            f.OrderedTick = s.Tick;
+            f.RunningWeeks = 0;
+            f.Learning = 0;
+            f.StartsThisMonth = 0;
+            f.LastUtilisation = 0;
+            f.EngineeringBudget = q.RecommendedEngineering;
+            f.PlannedStarts = f.Capacity;
+            s.Log($"{f.Name} shuts down to retool from {old.Name} to {n.Name}: {Format.Big(q.NetCapex)} over {q.BuildMonths} months. " +
+                  $"{Format.Big(writeOff)} of old equipment is written off.", 1);
+            return null;
+        }
+
         /// <summary>
         /// Closes a fab for good: running and engineering costs stop, wafers in progress are scrapped, the equipment is sold
         /// for <see cref="SalvageShare"/> of its remaining value and the rest is written off. Works on a fab under construction too.
@@ -245,11 +326,14 @@ namespace SiliconeTycoon.Sim
                     s.Ledger.Invest(rest);
                     f.CapexPaid += rest;
                 }
-                f.BookValue = f.CapexPaid;
-                f.MonthlyDepreciation = f.CapexPaid / DepreciationMonths;
+                f.BookValue += f.CapexPaid;
+                f.MonthlyDepreciation = f.BookValue / DepreciationMonths;
                 f.Stage = FabStage.Ramping;
                 f.RunningWeeks = 0;
-                s.Log($"{f.Name} is built. First wafers are going in; yields will start poor and improve.", 1);
+                s.Log(f.Retooling
+                    ? $"{f.Name} is back up on {n.Name}. First wafers are going in; yields will start poor and improve."
+                    : $"{f.Name} is built. First wafers are going in; yields will start poor and improve.", 1);
+                f.Retooling = false;
                 return;
             }
             if (!f.Producing) return;

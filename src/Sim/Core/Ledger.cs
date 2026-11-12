@@ -21,6 +21,7 @@ namespace SiliconeTycoon.Sim
         public const string DesignHouse = "Design house fees";
         public const string Penalties = "Contract penalties";
         public const string FabClosure = "Fab closures";
+        public const string Retooling = "Retooling write-offs";
     }
 
     public class Loan

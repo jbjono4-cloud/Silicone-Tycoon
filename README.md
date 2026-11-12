@@ -14,6 +14,7 @@ The vertical slice covers 1970–1985 as a newly founded integrated company. Mil
 - **Process nodes** 10 µm → 1.5 µm with density, clock, wafer size, cost and defect data.
 - **Node race**: research programmes with a hidden slip roll; more budget cuts the slip risk; slips keep costing money.
 - **Fabs** in real-world locations: quote, subsidies, construction, ramp, wafer starts, lots, running costs, depreciation.
+- **Fab retooling and closure**: re-equip a fab for a newer node at about 55% of a new fab's cost (70% if the wafer size changes) and 60% of the build time, with learning starting again and most old equipment written off; or close a fab, salvaging 15% of its book value.
 - **Learning curve**: defect density falls faster with volume and engineering spend.
 - **Yield model**: dies per wafer, clustered-defect (negative binomial) yield, Monte Carlo lot sampling.
 - **Saves**: whole game state as versioned JSON.
