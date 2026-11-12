@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 
 namespace SiliconeTycoon.Sim
@@ -34,6 +35,8 @@ namespace SiliconeTycoon.Sim
         public List<string> NodesReady = new List<string>();
         public List<NodeProgram> NodePrograms = new List<NodeProgram>();
         public List<Fab> Fabs = new List<Fab>();
+        public List<ChipDesign> Designs = new List<ChipDesign>();
+        public List<DesignTeam> DesignTeams = new List<DesignTeam>();
         public List<NewsItem> News = new List<NewsItem>();
 
         [JsonIgnore] public double Cash => Ledger.Cash;
@@ -49,6 +52,7 @@ namespace SiliconeTycoon.Sim
 
         public string NewId(string prefix) => prefix + (NextId++);
         public bool NodeReady(string nodeId) => NodesReady.Contains(nodeId);
+        public ChipDesign Design(string id) => id == null ? null : Designs.FirstOrDefault(c => c.Id == id);
 
         public void Log(string text, int severity = 0)
         {

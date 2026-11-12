@@ -24,6 +24,8 @@ namespace SiliconeTycoon.Sim
         public int DiesPerWafer;
         public int GrossDies;
         public int GoodDies;
+        /// <summary>Dies per bin (including scrap) for lots of a real design; null for test wafers.</summary>
+        public Dictionary<string, int> Bins;
         public bool Done;
         /// <summary>Set once the finished dies have been handed on (sold, binned, stocked).</summary>
         public bool Delivered;
@@ -57,8 +59,9 @@ namespace SiliconeTycoon.Sim
         public double EngineeringBudget;
         /// <summary>Wafer starts per month the player wants.</summary>
         public int PlannedStarts;
-        /// <summary>Die size the planned starts make, until products drive starts (milestone 2).</summary>
+        /// <summary>Die size of what the fab is making. Test wafers use a nominal 10 mm² die.</summary>
         public double DieAreaMm2 = 10;
+        /// <summary>Released design the fab makes; null runs test wafers that teach the process but aren't sold.</summary>
         public string DesignId;
 
         public int StartsThisMonth;
@@ -178,6 +181,25 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
+        /// <summary>Points the fab at a released design on its node (or null for test wafers). Lots already started finish as they were.</summary>
+        public static string AssignDesign(GameData d, GameState s, Fab f, string designId)
+        {
+            if (designId == null)
+            {
+                f.DesignId = null;
+                f.DieAreaMm2 = 10;
+                return null;
+            }
+            var c = s.Design(designId);
+            if (c == null) return "Unknown chip.";
+            if (c.Stage != DesignStage.Released) return $"Release the {c.Name} before putting it into production.";
+            if (c.NodeId != f.NodeId) return $"The {c.Name} is laid out for {d.Node(c.NodeId).Name}, but {f.Name} runs {d.Node(f.NodeId).Name}.";
+            f.DesignId = c.Id;
+            f.DieAreaMm2 = c.DieAreaMm2;
+            s.Log($"{f.Name} switches production to the {c.Name}.", 0);
+            return null;
+        }
+
         public static string SetEngineering(Fab f, double perMonth)
         {
             if (perMonth < 0) return "The engineering budget can't be negative.";
@@ -217,7 +239,7 @@ namespace SiliconeTycoon.Sim
             }
 
             StartWafers(d, s, f, n);
-            FinishLots(s, f);
+            FinishLots(d, s, f);
         }
 
         static void StartWafers(GameData d, GameState s, Fab f, ProcessNodeDef n)
@@ -249,14 +271,23 @@ namespace SiliconeTycoon.Sim
             s.Ledger.Book(Accounts.Materials, -wafers * WaferCost(d, s, f));
         }
 
-        static void FinishLots(GameState s, Fab f)
+        static void FinishLots(GameData d, GameState s, Fab f)
         {
             foreach (var lot in f.Lots)
             {
                 if (lot.Done || lot.DoneTick > s.Tick) continue;
-                int sample = Math.Min(lot.GrossDies, SampleDies);
-                double y = YieldModel.SampleYield(s.Rng, sample, lot.D0, lot.DieAreaMm2);
-                lot.GoodDies = (int)Math.Round(lot.GrossDies * y);
+                var design = s.Design(lot.DesignId);
+                if (design != null)
+                {
+                    lot.Bins = Binning.Lot(d, s.Rng, design, lot.D0, lot.GrossDies);
+                    lot.GoodDies = Binning.Good(lot.Bins);
+                }
+                else
+                {
+                    int sample = Math.Min(lot.GrossDies, SampleDies);
+                    double y = YieldModel.SampleYield(s.Rng, sample, lot.D0, lot.DieAreaMm2);
+                    lot.GoodDies = (int)Math.Round(lot.GrossDies * y);
+                }
                 lot.Done = true;
             }
             f.Lots.RemoveAll(l => l.Done && l.Delivered && l.DoneTick < s.Tick - KeepLotsWeeks);

@@ -1,0 +1,10 @@
+[
+  { "Id": "dip16p", "Name": "16-pin plastic DIP",  "Year": 1970, "Pins": 16,  "MaxPowerW": 0.8, "MaxDieMm2": 25,  "Cost": 0.4,  "Yield": 0.99 },
+  { "Id": "dip24c", "Name": "24-pin ceramic DIP",  "Year": 1970, "Pins": 24,  "MaxPowerW": 1.5, "MaxDieMm2": 30,  "Cost": 2.0,  "Yield": 0.985 },
+  { "Id": "dip40c", "Name": "40-pin ceramic DIP",  "Year": 1971, "Pins": 40,  "MaxPowerW": 2.5, "MaxDieMm2": 50,  "Cost": 3.0,  "Yield": 0.985 },
+  { "Id": "dip40p", "Name": "40-pin plastic DIP",  "Year": 1972, "Pins": 40,  "MaxPowerW": 1.0, "MaxDieMm2": 40,  "Cost": 0.8,  "Yield": 0.99 },
+  { "Id": "dip64c", "Name": "64-pin ceramic DIP",  "Year": 1977, "Pins": 64,  "MaxPowerW": 3.0, "MaxDieMm2": 70,  "Cost": 5.0,  "Yield": 0.98 },
+  { "Id": "plcc68", "Name": "68-pin PLCC",         "Year": 1981, "Pins": 68,  "MaxPowerW": 2.0, "MaxDieMm2": 80,  "Cost": 1.5,  "Yield": 0.99 },
+  { "Id": "pga68",  "Name": "68-pin ceramic PGA",  "Year": 1982, "Pins": 68,  "MaxPowerW": 5.0, "MaxDieMm2": 100, "Cost": 8.0,  "Yield": 0.985 },
+  { "Id": "pga132", "Name": "132-pin ceramic PGA", "Year": 1985, "Pins": 132, "MaxPowerW": 6.0, "MaxDieMm2": 150, "Cost": 12.0, "Yield": 0.98 }
+]

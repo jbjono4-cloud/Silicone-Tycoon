@@ -16,6 +16,9 @@ namespace SiliconeTycoon.Sim
         public const string ProcessResearch = "Process research";
         public const string Interest = "Interest";
         public const string Overhead = "Head office";
+        public const string DesignStaff = "Design engineers";
+        public const string MaskSets = "Mask sets";
+        public const string DesignHouse = "Design house fees";
     }
 
     public class Loan

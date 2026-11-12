@@ -13,6 +13,8 @@ namespace SiliconeTycoon.Sim
         public double StartingCash = 3_000_000;
         /// <summary>Processes the company starts with. Null = every node in production by the start year.</summary>
         public List<string> NodesReady;
+        /// <summary>Engineers in the starting design team.</summary>
+        public int StartingEngineers = 4;
     }
 
     /// <summary>The weekly simulation loop.</summary>
@@ -36,6 +38,7 @@ namespace SiliconeTycoon.Sim
             s.NodesReady = o.NodesReady != null
                 ? new List<string>(o.NodesReady)
                 : d.Nodes.Where(n => n.Year <= o.StartYear).Select(n => n.Id).ToList();
+            DesignOps.AddTeam(s, "Design team", o.StartingEngineers);
             s.Log($"{s.CompanyName} opens its doors with {Format.Big(s.Cash)} in the bank.", 1);
             return s;
         }
@@ -45,6 +48,7 @@ namespace SiliconeTycoon.Sim
         {
             if (s.GameOver) return;
             ProcessResearch.WeekTick(d, s);
+            DesignOps.WeekTick(d, s);
             foreach (var f in s.Fabs) FabOps.WeekTick(d, s, f);
             if (Calendar.IsMonthEnd(s.Tick)) MonthEnd(d, s);
             s.Tick++;
@@ -60,6 +64,7 @@ namespace SiliconeTycoon.Sim
         static void MonthEnd(GameData d, GameState s)
         {
             foreach (var f in s.Fabs) FabOps.MonthEnd(d, s, f);
+            DesignOps.MonthEnd(s);
             Finance.MonthEnd(s);
             s.Ledger.Close(s.MonthIndex);
 

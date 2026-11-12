@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SiliconeTycoon.Sim
 {
@@ -12,6 +13,7 @@ namespace SiliconeTycoon.Sim
             PropertyNameCaseInsensitive = true,
             ReadCommentHandling = JsonCommentHandling.Skip,
             AllowTrailingCommas = true,
+            Converters = { new JsonStringEnumConverter() },
         };
 
         /// <summary>For save files.</summary>
@@ -19,6 +21,7 @@ namespace SiliconeTycoon.Sim
         {
             IncludeFields = true,
             WriteIndented = false,
+            Converters = { new JsonStringEnumConverter() },
         };
     }
 }

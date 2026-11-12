@@ -108,7 +108,7 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Null(ProcessResearch.Active(s, "n8um"));
             Simulation.AdvanceMonths(D, s, 40);
             Assert.False(s.NodeReady("n8um"));
-            Assert.Empty(s.NodePrograms.Where(x => x.NodeId == "n8um"));
+            Assert.DoesNotContain(s.NodePrograms, x => x.NodeId == "n8um");
         }
     }
 }

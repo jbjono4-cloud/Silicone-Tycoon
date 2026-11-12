@@ -26,3 +26,21 @@ All values are **game-tuning approximations**, not sourced historical figures. M
 ## locations.json
 
 Indexes are relative to the United States = 1.0. `Subsidy` is the share of fab capex paid by grants. `QuakeRisk` and `PoliticalRisk` are annual disruption chances (used once events arrive in milestone 6). `From`/`To` limit the years you can build there.
+
+## blocks.json
+
+| Field | Meaning |
+| --- | --- |
+| `Kind` | `Core`, `Ram`, `Rom`, `MemoryInterface`, `Io` or `Graphics` |
+| `LogicTransistors`, `SramTransistors` | Area comes from these over the node's logic and SRAM densities |
+| `FixedAreaMm2` | Pads and analog at 10 µm; shrinks only with feature size^0.35 |
+| `Activity` | Share of transistors switching each clock (power) |
+| `LogicDepth` | Critical path relative to the node; top clock = node MaxClockMHz / LogicDepth |
+| `Pins` | I/O rings: pads supplied. Other blocks: pins needed |
+| `Ipc`, `Graphics`, `BytesPerClock`, `RamBytes`, `RomBytes` | Performance inputs |
+| `RepairCapacity` | Defects spare rows can repair |
+| `Disableable` | A defect switches the block off instead of killing the die (harvesting) |
+
+## packages.json
+
+`Pins`, `MaxPowerW` and `MaxDieMm2` limit what fits; `Cost` (1970 dollars) is added per chip; `Yield` is the share surviving assembly.
