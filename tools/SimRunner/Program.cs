@@ -51,6 +51,7 @@ bool StartChip(SegmentDef seg)
 {
     var c = DesignLab.PlanForSegment(d, s, FabNode(), seg.Metric, $"RS-{s.Designs.Count + 1}", maxPowerW: seg.MaxPowerW);
     if (c == null) return false;
+    c.Verification = 0.45;   // fewer showstoppers, fewer steppings
     string err = DesignOps.StartDesign(d, s, c, team.Id);
     Fail(err);
     if (err == null) segmentOf[c.Id] = seg.Id;
@@ -140,16 +141,11 @@ while (s.Tick < endTick && !s.GameOver)
         // (only once the newest node has a fab, so research never runs two nodes ahead of production)
         var next = d.Nodes.FirstOrDefault(n => n.Requires == best && !s.NodeReady(n.Id));
         if (next != null && FabNode() == best && !s.NodePrograms.Any(p => !p.Done)
-            && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null && Spendable() > next.ResearchCost * s.Inflation)
+            && ProcessResearch.CanStart(d, s, next.Id, 1.0) == null
+            && Spendable() > next.ResearchCost * s.Inflation + 0.5 * next.FabCostPer1000 * s.Inflation)   // keep money for the fab it will need
             Fail(ProcessResearch.Start(d, s, next.Id));
 
-        // a fab on each new node, once it can be funded, sized to what we sell (1,000 wafers for the first)
-        double avgSales = s.MarketHistory.Where(r => r.Month >= s.MonthIndex - 3).Sum(r => r.PlayerUnits) / 3
-                          + s.Contracts.Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active).Sum(k => k.LastMonthOrdered);
-        var bestNode = d.Node(best);
-        double goodPerWafer = YieldModel.DiesPerWafer(bestNode.WaferMm, YieldModel.WithScribe(20))
-                              * YieldModel.Yield(LearningCurve.D0(bestNode, DesignLab.EstimateLearning), 20);
-        int wanted = avgSales <= 0 ? 1000 : (int)Math.Clamp(Math.Ceiling(avgSales * 1.3 / goodPerWafer / 100) * 100, 300, 1000);
+        // a fab on each new node, once it can be funded
         // with two or more fabs producing, retool the oldest instead of building (cheaper, and it was falling behind anyway)
         var producing = s.Fabs.Where(f => f.Producing).OrderByDescending(f => d.Node(f.NodeId).FeatureNm).ToList();
         if (!building && !s.Fabs.Any(f => f.NodeId == best && f.Stage != FabStage.Closed) && producing.Count >= 2)
@@ -164,7 +160,7 @@ while (s.Tick < endTick && !s.GameOver)
             }
         }
         if (!building && !s.Fabs.Any(f => f.NodeId == best && f.Stage != FabStage.Closed))
-            foreach (int size in new[] { wanted, Math.Max(300, wanted / 2) })   // the size it wants, else half that
+            foreach (int size in new[] { 1000, 700, 500 })   // a full-size fab if it can fund one: new nodes win share
             {
                 var q = FabOps.Quote(d, s, best, CheapestSite(), size);
                 if (q.Problem != null || Spendable() <= q.NetCapex) continue;
