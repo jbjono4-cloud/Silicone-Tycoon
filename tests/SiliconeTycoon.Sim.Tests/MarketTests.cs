@@ -159,6 +159,42 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void ContractsCapMonthlyOrders()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            var k = AddContract(s, c, "Standard");
+            k.MaxMonthly = 1000;
+            Market.AddStock(s, c.Id, "Standard", 1e8);
+            Simulation.AdvanceMonths(D, s, 1);
+            Assert.Equal(1000, k.LastMonthOrdered, 6);
+            Assert.Equal(1000, k.LastMonthDelivered, 6);
+        }
+
+        [Fact]
+        public void RivalsPriceAgainstTheGoingRateNotBareCost()
+        {
+            var s = TestData.NewGame();
+            Simulation.AdvanceMonths(D, s, 4 * 12);
+            var seg = D.Segment("embedded");
+            var r = Rivals.Get(s, "meridian");
+            var p = Rivals.OpenMarketOffer(D, s, r, seg);
+            Assert.NotNull(p);
+            double price = Rivals.Price(s, r, p, seg);
+            Assert.True(price >= Rivals.Cost(s, p) * Rivals.MinMarkup - 1e-9);
+            Assert.True(price >= Market.ExpectedPrice(seg, s.YearF) * r.BasePriceFactor * Rivals.PriceWarFloor - 1e-9);
+        }
+
+        [Fact]
+        public void RivalCapacityStartsInProportionToDemand()
+        {
+            var s = TestData.NewGame();
+            double embedded = D.Segment("embedded").DemandAt(s.YearF);
+            var m = Rivals.Get(s, "meridian");
+            Assert.InRange(m.Capacity, Rivals.MinCapacity, System.Math.Max(Rivals.MinCapacity, embedded));
+        }
+
+        [Fact]
         public void DownBinningFillsOrdersFromBetterBins()
         {
             var s = TestData.NewGame(year: 1975);

@@ -211,6 +211,10 @@ namespace SiliconeTycoon.Sim
                 if (shares + seg.OpenShare > 1.0001) p.Add($"{seg.Id}: customer shares plus OpenShare exceed 100%");
             }
             foreach (var x in Rivals)
+            {
+                if (x.PriceFactor <= 0 || x.StartShare <= 0 || x.StartShare > 1 || x.Engineers <= 0) p.Add($"{x.Id}: bad price factor, start share or engineers");
+            }
+            foreach (var x in Rivals)
                 foreach (var id in x.Segments)
                     if (Segment(id) == null) p.Add($"{x.Id}: unknown segment {id}");
             return p;

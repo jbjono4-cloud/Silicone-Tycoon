@@ -64,6 +64,8 @@ namespace SiliconeTycoon.Sim
         public ContractStatus Status = ContractStatus.Active;
         /// <summary>Consecutive months with more than half the order missing.</summary>
         public int ShortMonths;
+        /// <summary>Most the customer orders in a month (its forecast plus upside); above that it second-sources. 0 = no cap.</summary>
+        public double MaxMonthly;
         public double Delivered;
         public double Shortfall;
         public double LastMonthOrdered;
@@ -103,8 +105,9 @@ namespace SiliconeTycoon.Sim
         public string Id;
         public string Name;
         public double Rep;
-        public double Markup;
-        public double BaseMarkup;
+        /// <summary>Current price as a share of the going price; falls in a price war.</summary>
+        public double PriceFactor;
+        public double BasePriceFactor;
         /// <summary>Chips a month it can make.</summary>
         public double Capacity;
         public double UsedThisMonth;

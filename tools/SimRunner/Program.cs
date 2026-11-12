@@ -16,7 +16,7 @@ ulong seed = args.Length > 1 ? ulong.Parse(args[1]) : 1;
 string dataFolder = args.Length > 2 ? args[2] : Path.Combine(AppContext.BaseDirectory, "data");
 
 var d = GameData.FromFolder(dataFolder);
-var s = Simulation.NewGame(d, new NewGameOptions { CompanyName = "Runner Semiconductor", Seed = seed, StartingCash = 6_000_000 });
+var s = Simulation.NewGame(d, new NewGameOptions { CompanyName = "Runner Semiconductor", Seed = seed, StartingCash = 6_000_000, StartingEngineers = 8 });
 var team = s.DesignTeams[0];
 var segmentOf = new Dictionary<string, string>();   // our chip id -> segment it was planned for
 
@@ -29,6 +29,15 @@ string CheapestSite() => d.Locations
 // cost per chip, from the estimate at design time carried forward by inflation
 double CostOf(ChipDesign c) => c.Stats.CostPerGoodDie / Calendar.Inflation(Calendar.YearF(c.StartedTick)) * s.Inflation;
 string Bin(ChipDesign c) => Binning.BinsFor(c)[0].Name;
+
+// Chips a month the company can make of a design: its node's fab capacity (built or building) × dies per wafer × yield.
+double CanMake(ChipDesign c) =>
+    s.Fabs.Where(f => f.NodeId == c.NodeId && f.Stage != FabStage.Closed).Sum(f => f.Capacity)
+    * c.Stats.DiesPerWafer * c.Stats.YieldEstimate;
+// Chips a month already promised on a node, at each contract's cap.
+double Committed(string nodeId) => s.Contracts
+    .Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active && s.Design(k.DesignId)?.NodeId == nodeId)
+    .Sum(k => k.MaxMonthly);
 
 void Fail(string err) { if (err != null) Console.WriteLine($"  ! {Calendar.DateLabel(s.Tick)}: {err}"); }
 
@@ -79,6 +88,7 @@ while (s.Tick < endTick && !s.GameOver)
                 .Where(c => c.Stats != null && c.Stage != DesignStage.Draft && c.Stage != DesignStage.Cancelled)
                 .Select(c => (chip: c, price: Math.Min(rfq.MaxPrice, Math.Max(CostOf(c) * 1.3, rfq.ExpectedPrice * 0.85))))
                 .Where(o => Market.CheckBid(d, rfq, o.chip, Bin(o.chip), o.price) == null && o.price >= CostOf(o.chip))
+                .Where(o => Committed(o.chip.NodeId) + rfq.EstimatedUnits * Market.ContractUpside <= CanMake(o.chip))   // only promise what we can make
                 .OrderByDescending(o => Market.Perf(o.chip, Bin(o.chip), seg.Metric))
                 .ToList();
             if (options.Count > 0) Market.SubmitBid(d, s, rfq.Id, options[0].chip.Id, Bin(options[0].chip), options[0].price);
@@ -125,6 +135,16 @@ while (s.Tick < endTick && !s.GameOver)
                 if (s.Cash < q.NetCapex * 0.5) Finance.Borrow(s, Math.Min(Finance.Headroom(s), q.NetCapex * 0.5 - s.Cash));
                 Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
             }
+        }
+
+        // sold out on the newest node: add another fab there
+        var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Producing).ToList();
+        if (!s.Fabs.Any(f => f.Stage == FabStage.Construction) && healthy && bestFabs.Count > 0
+            && bestFabs.All(f => f.LastUtilisation > 0.9) && stock < Math.Max(monthlyOrders, lastSales) * 0.5)
+        {
+            var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
+            if (q.Problem == null && s.Cash > q.NetCapex * 0.6)
+                Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
         }
 
         // stay solvent: borrow when cash runs low, repay when flush

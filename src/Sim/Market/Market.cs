@@ -37,6 +37,8 @@ namespace SiliconeTycoon.Sim
         /// <summary>How sharply open-market share follows attractiveness.</summary>
         public const double ShareExponent = 3;
         public const int MaxHistory = 1500;
+        /// <summary>Contracts cap monthly orders at the customer's forecast times this; the rest goes to second sources.</summary>
+        public const double ContractUpside = 1.3;
 
         public static double YearOfMonth(int month) => Calendar.YearF(month * Calendar.WeeksPerMonth);
 
@@ -167,7 +169,7 @@ namespace SiliconeTycoon.Sim
                 {
                     var p = Rivals.OpenMarketOffer(d, s, r, seg);
                     if (p == null) continue;
-                    double price = Rivals.Price(s, r, p);
+                    double price = Rivals.Price(s, r, p, seg);
                     double perf = Perf(p.Design, Rivals.BinOf(p), seg.Metric);
                     offers.Add((r.Id, null, r, Attract(perf / need, expected / price, seg, GameState.RepFactorOf(r.Rep)), price));
                 }
@@ -356,6 +358,7 @@ namespace SiliconeTycoon.Sim
                         BasePrice = best.Price,
                         StartMonth = r.StartMonth,
                         EndMonth = cs.ContractEndMonth,
+                        MaxMonthly = r.EstimatedUnits * ContractUpside,
                     };
                     s.Contracts.Add(k);
                     cs.ContractId = k.Id;
@@ -365,7 +368,7 @@ namespace SiliconeTycoon.Sim
                 if (winner == Player)
                 {
                     AdjustRep(s, 0.01);
-                    s.Log($"You win {cust.Name}'s design: about {r.EstimatedUnits:N0} chips a month for {r.LengthMonths} months from " +
+                    s.Log($"You win {cust.Name}'s design: about {r.EstimatedUnits:N0} chips a month (up to {r.EstimatedUnits * ContractUpside:N0}) for {r.LengthMonths} months from " +
                           $"{Calendar.DateLabel(r.StartMonth * Calendar.WeeksPerMonth)}, at {Format.Money(best.Price)} each.", 1);
                 }
                 else if (playerBid) s.Log($"{cust.Name} picks {SupplierName(s, winner)} over your bid.", 2);
@@ -391,6 +394,7 @@ namespace SiliconeTycoon.Sim
                 if (month < k.StartMonth) continue;
 
                 double ordered = cust.Active(s.Year) ? rec.Demand * cust.Share : 0;
+                if (k.MaxMonthly > 0) ordered = Math.Min(ordered, k.MaxMonthly);
                 double price = ContractPrice(k, month);
                 k.LastMonthOrdered = ordered;
 

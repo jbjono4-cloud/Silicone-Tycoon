@@ -88,10 +88,11 @@ namespace SiliconeTycoon.Sim
         public string Country;
         /// <summary>Years behind the historical node schedule.</summary>
         public double NodeLagYears;
-        public double Markup = 1.5;
+        /// <summary>Normal price as a share of the segment's going price. Below 1 = undercuts the market.</summary>
+        public double PriceFactor = 1.0;
         public double Rep;
-        /// <summary>Chips a month it can make at the start.</summary>
-        public double StartCapacity;
+        /// <summary>Starting capacity as a share of the demand in its segments.</summary>
+        public double StartShare = 0.2;
         public int Engineers = 8;
         public List<string> Segments = new List<string>();
     }

@@ -5,8 +5,8 @@ namespace SiliconeTycoon.Sim
 {
     /// <summary>
     /// Rival companies. They reach each process node on the historical schedule plus their lag (and their own slips),
-    /// design real chips for their segments with the same <see cref="DesignLab"/> maths as the player, price at cost times
-    /// a markup, grow capacity when busy, and start price wars when their fabs sit idle.
+    /// design real chips for their segments with the same <see cref="DesignLab"/> maths as the player, price against the
+    /// going rate (never below cost plus a small margin), grow capacity when busy, and start price wars when their fabs sit idle.
     /// </summary>
     public static class Rivals
     {
@@ -17,6 +17,12 @@ namespace SiliconeTycoon.Sim
         public const double PriceWarUtilisation = 0.6;
         /// <summary>Chips kept on sale per segment.</summary>
         public const int ProductsPerSegment = 2;
+        /// <summary>Lowest price a rival will charge, as a multiple of its cost.</summary>
+        public const double MinMarkup = 1.1;
+        /// <summary>Smallest capacity a rival keeps, in chips a month.</summary>
+        public const double MinCapacity = 2000;
+        /// <summary>How far a price war can push the price factor, as a share of normal.</summary>
+        public const double PriceWarFloor = 0.5;
 
         public static RivalState Get(GameState s, string id) => s.Rivals.FirstOrDefault(r => r.Id == id);
 
@@ -32,7 +38,9 @@ namespace SiliconeTycoon.Sim
         public static double Cost(GameState s, RivalProduct p) =>
             p.CostReal * s.Inflation * Math.Max(0.6, Math.Pow(0.93, (s.Tick - p.ReleasedTick) / (double)Calendar.WeeksPerYear));
 
-        public static double Price(GameState s, RivalState r, RivalProduct p) => Cost(s, p) * r.Markup;
+        /// <summary>A rival's price for a chip in a segment: the going price times its price factor, but never below cost plus <see cref="MinMarkup"/>.</summary>
+        public static double Price(GameState s, RivalState r, RivalProduct p, SegmentDef seg) =>
+            Math.Max(Cost(s, p) * MinMarkup, Market.ExpectedPrice(seg, s.YearF) * r.PriceFactor);
 
         public static void Init(GameData d, GameState s)
         {
@@ -43,9 +51,9 @@ namespace SiliconeTycoon.Sim
                     Id = def.Id,
                     Name = def.Name,
                     Rep = def.Rep,
-                    Markup = def.Markup,
-                    BaseMarkup = def.Markup,
-                    Capacity = def.StartCapacity,
+                    PriceFactor = def.PriceFactor,
+                    BasePriceFactor = def.PriceFactor,
+                    Capacity = Math.Max(MinCapacity, def.StartShare * def.Segments.Select(id => d.Segment(id)).Where(x => x != null).Sum(x => x.DemandAt(s.YearF))),
                     NodesReady = d.Nodes.Where(n => n.Requires == null || n.Year + def.NodeLagYears <= s.YearF).Select(n => n.Id).ToList(),
                 };
                 s.Rivals.Add(r);
@@ -76,7 +84,7 @@ namespace SiliconeTycoon.Sim
             double need = seg.NeedAt(s.YearF);
             return r.Products
                 .Where(p => Market.Perf(p.Design, BinOf(p), seg.Metric) >= need * Market.OpenMarketMinShare && Market.Power(p.Design, BinOf(p)) <= seg.MaxPowerW)
-                .OrderByDescending(p => Market.Perf(p.Design, BinOf(p), seg.Metric) / Price(s, r, p))
+                .OrderByDescending(p => Market.Perf(p.Design, BinOf(p), seg.Metric) / Price(s, r, p, seg))
                 .FirstOrDefault();
         }
 
@@ -92,7 +100,7 @@ namespace SiliconeTycoon.Sim
                     var p = r.Products
                         .Where(x => Market.Perf(x.Design, BinOf(x), seg.Metric) >= rfq.MinMetric
                                     && Market.Power(x.Design, BinOf(x)) <= rfq.MaxPowerW
-                                    && Cost(s, x) * 1.05 <= rfq.MaxPrice)
+                                    && Cost(s, x) * MinMarkup <= rfq.MaxPrice)
                         .OrderByDescending(x => Market.Perf(x.Design, BinOf(x), seg.Metric) / Cost(s, x))
                         .FirstOrDefault();
                     if (p == null) continue;
@@ -101,7 +109,7 @@ namespace SiliconeTycoon.Sim
                         BidderId = r.Id,
                         DesignId = p.Design.Id,
                         Bin = BinOf(p),
-                        Price = Math.Min(rfq.MaxPrice, Cost(s, p) * r.Markup),
+                        Price = Math.Min(rfq.MaxPrice, Math.Max(Cost(s, p) * MinMarkup, rfq.ExpectedPrice * r.PriceFactor)),
                         SubmittedTick = s.Tick,
                     });
                 }
@@ -119,15 +127,15 @@ namespace SiliconeTycoon.Sim
                 r.TotalRevenue += r.RevenueThisMonth;
                 r.LastUtilisation = r.Capacity > 0 ? r.UsedThisMonth / r.Capacity : 0;
 
-                // capacity follows sales
-                if (r.LastUtilisation > 0.85) r.Capacity *= 1.04;
-                else if (r.LastUtilisation < 0.5 && r.Products.Count > 0) r.Capacity = Math.Max(def.StartCapacity * 0.5, r.Capacity * 0.98);
+                // capacity follows sales: fast growth when sold out, slow shrinking when idle
+                if (r.LastUtilisation > 0.85) r.Capacity *= 1.06;
+                else if (r.LastUtilisation < 0.5 && r.Products.Count > 0) r.Capacity = Math.Max(MinCapacity, r.Capacity * 0.98);
 
                 // idle fabs mean price cuts; full ones let prices recover
                 if (r.Products.Count > 0 && r.LastUtilisation < PriceWarUtilisation)
                 {
-                    r.Markup = Math.Max(1.08, r.Markup * 0.97);
-                    if (!r.PriceWar && r.Markup < r.BaseMarkup * 0.85)
+                    r.PriceFactor = Math.Max(r.BasePriceFactor * PriceWarFloor, r.PriceFactor * 0.97);
+                    if (!r.PriceWar && r.PriceFactor < r.BasePriceFactor * 0.85)
                     {
                         r.PriceWar = true;
                         s.Log($"{r.Name} slashes its prices to fill its fabs.", 2);
@@ -135,8 +143,12 @@ namespace SiliconeTycoon.Sim
                 }
                 else if (r.LastUtilisation > 0.9)
                 {
-                    r.Markup = Math.Min(r.BaseMarkup, r.Markup * 1.02);
-                    if (r.PriceWar && r.Markup >= r.BaseMarkup * 0.95) r.PriceWar = false;
+                    r.PriceFactor = Math.Min(r.BasePriceFactor, r.PriceFactor * 1.02);
+                    if (r.PriceWar && r.PriceFactor >= r.BasePriceFactor * 0.95)
+                    {
+                        r.PriceWar = false;
+                        s.Log($"{r.Name}'s fabs are full again and its prices recover.", 0);
+                    }
                 }
 
                 // the node race

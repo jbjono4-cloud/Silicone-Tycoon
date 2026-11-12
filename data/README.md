@@ -55,4 +55,4 @@ Indexes are relative to the United States = 1.0. `Subsidy` is the share of fab c
 
 ## rivals.json
 
-`NodeLagYears` behind history's node dates, `Markup` over cost, starting `Rep` and `StartCapacity` (chips a month), design `Engineers`, and the `Segments` they compete in.
+`NodeLagYears` behind history's node dates, `PriceFactor` (normal price as a share of the going price; never below cost × 1.1, and down to half in a price war), starting `Rep`, `StartShare` (starting capacity as a share of demand in its segments), design `Engineers`, and the `Segments` they compete in.
