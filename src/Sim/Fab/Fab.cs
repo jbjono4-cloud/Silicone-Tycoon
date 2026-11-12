@@ -292,7 +292,7 @@ namespace SiliconeTycoon.Sim
         public static string Close(GameData d, GameState s, Fab f)
         {
             if (f.Stage == FabStage.Closed) return $"{f.Name} is already closed.";
-            double value = f.Stage == FabStage.Construction ? f.CapexPaid : f.BookValue;
+            double value = f.Stage == FabStage.Construction ? f.CapexPaid + f.BookValue : f.BookValue;   // a retooling fab still carries its old equipment
             double salvage = value * SalvageShare;
             s.Ledger.Cash += salvage;
             if (value - salvage > 0) s.Ledger.Accrue(Accounts.FabClosure, -(value - salvage));

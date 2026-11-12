@@ -8,6 +8,7 @@ config_version=5
 
 config/name="Silicone Tycoon"
 config/description="Design chips, build fabs and survive the node race, from 1970 to today."
+run/main_scene="res://Scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 
 [display]

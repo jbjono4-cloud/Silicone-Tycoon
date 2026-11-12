@@ -108,7 +108,7 @@ namespace SiliconeTycoon.Sim
                     s.NodesReady.Add(n.Id);
                     int lateMonths = (p.ActualWeeks - p.PlannedWeeks) / Calendar.WeeksPerMonth;
                     string when = lateMonths > 0 ? $", {lateMonths} months late" : ", on schedule";
-                    s.Log($"The {n.Name} process is ready for production{when}. Total cost {Format.Big(p.Spent)}.", 1);
+                    s.Log($"The {n.Name} process is ready for production{when}. Total cost {Format.Big(p.Spent)}.", 1, NewsKinds.NodeReady);
                 }
             }
         }

@@ -333,7 +333,7 @@ namespace SiliconeTycoon.Sim
                 s.Rfqs.Add(rfq);
                 cs.NextRfqMonth = int.MaxValue;
                 s.Log($"{cust.Name} asks for bids on a {seg.Name.ToLower()} chip: {seg.Metric.ToString().ToLower()} {rfq.MinMetric:0.00}+, under {rfq.MaxPowerW:0.#} W, " +
-                      $"up to {Format.Money(rfq.MaxPrice)} each, about {rfq.EstimatedUnits:N0} a month. Bids close end of {Calendar.DateLabel(close * Calendar.WeeksPerMonth)}.", 0);
+                      $"up to {Format.Money(rfq.MaxPrice)} each, about {rfq.EstimatedUnits:N0} a month. Bids close end of {Calendar.DateLabel(close * Calendar.WeeksPerMonth)}.", 0, NewsKinds.Rfq);
             }
         }
 

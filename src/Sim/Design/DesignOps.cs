@@ -134,9 +134,9 @@ namespace SiliconeTycoon.Sim
             c.FoundBugs += found;
             c.Showstoppers += stoppers;
             c.Stage = DesignStage.Validated;
-            if (found == 0) s.Log($"First silicon of the {c.Name} ({c.SteppingName}) passes validation. Ready to release.", 1);
-            else if (stoppers > 0) s.Log($"The {c.Name} ({c.SteppingName}) has {found} bug{(found == 1 ? "" : "s")}, {stoppers} too serious to ship. It needs a new stepping.", 3);
-            else s.Log($"The {c.Name} ({c.SteppingName}) has {found} minor bug{(found == 1 ? "" : "s")}. Ship with errata, or fix them in a new stepping.", 2);
+            if (found == 0) s.Log($"First silicon of the {c.Name} ({c.SteppingName}) passes validation. Ready to release.", 1, NewsKinds.Validated);
+            else if (stoppers > 0) s.Log($"The {c.Name} ({c.SteppingName}) has {found} bug{(found == 1 ? "" : "s")}, {stoppers} too serious to ship. It needs a new stepping.", 3, NewsKinds.Validated);
+            else s.Log($"The {c.Name} ({c.SteppingName}) has {found} minor bug{(found == 1 ? "" : "s")}. Ship with errata, or fix them in a new stepping.", 2, NewsKinds.Validated);
         }
 
         /// <summary>Starts a new stepping to fix the bugs validation found. Fixes can introduce new bugs.</summary>

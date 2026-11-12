@@ -10,6 +10,19 @@ namespace SiliconeTycoon.Sim
         public string Text;
         /// <summary>0 info, 1 good, 2 warning, 3 bad.</summary>
         public int Severity;
+        /// <summary>What happened, for the UI to react to (see <see cref="NewsKinds"/>). Null for general news.</summary>
+        public string Kind;
+    }
+
+    /// <summary>News types the UI can react to, such as pausing the game.</summary>
+    public static class NewsKinds
+    {
+        /// <summary>A customer opened a request for quotes.</summary>
+        public const string Rfq = "rfq";
+        /// <summary>A chip's silicon came back from validation and needs a decision (release or step).</summary>
+        public const string Validated = "validated";
+        /// <summary>A process node became ready.</summary>
+        public const string NodeReady = "node";
     }
 
     /// <summary>Everything that changes during a game. Saved and loaded whole as JSON.</summary>
@@ -64,9 +77,9 @@ namespace SiliconeTycoon.Sim
         public bool NodeReady(string nodeId) => NodesReady.Contains(nodeId);
         public ChipDesign Design(string id) => id == null ? null : Designs.FirstOrDefault(c => c.Id == id);
 
-        public void Log(string text, int severity = 0)
+        public void Log(string text, int severity = 0, string kind = null)
         {
-            News.Add(new NewsItem { Tick = Tick, Text = text, Severity = severity });
+            News.Add(new NewsItem { Tick = Tick, Text = text, Severity = severity, Kind = kind });
             if (News.Count > 500) News.RemoveAt(0);
         }
     }
