@@ -16,8 +16,10 @@ namespace SiliconeTycoon.UI
         VBoxContainer list, teamBox;
         // new chip form
         LineEdit nameEdit;
-        OptionButton segPick, nodePick;
-        SpinBox clockSpin, verifSpin;
+        OptionButton segPick, nodePick, briefPick;
+        SpinBox clockSpin, verifSpin, timingSpin;
+        List<Rfq> formRfqs = new List<Rfq>();
+        string formRfq;
         VBoxContainer planBox;
         List<ProcessNodeDef> formNodes = new List<ProcessNodeDef>();
         List<SegmentDef> formSegs = new List<SegmentDef>();
@@ -57,8 +59,12 @@ namespace SiliconeTycoon.UI
             nameEdit = new LineEdit { PlaceholderText = "Chip name" };
             b.AddChild(nameEdit);
             b.AddChild(Ui.Heading("Market"));
-            segPick = Ui.Options(new string[0], 0, i => { formSeg = formSegs[i].Id; if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
+            segPick = Ui.Options(new string[0], 0, i => { formSeg = formSegs[i].Id; formRfq = null; RefreshBriefs(); if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
             b.AddChild(segPick);
+            b.AddChild(Ui.Heading("Brief"));
+            briefPick = Ui.Options(new string[0], 0, i => { formRfq = i == 0 ? null : formRfqs[i - 1].Id; if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
+            briefPick.TooltipText = "Plan for the market as a whole, or to meet one customer's request (features, clock, pins)";
+            b.AddChild(briefPick);
             b.AddChild(Ui.Heading("Process node"));
             nodePick = Ui.Options(new string[0], 0, i => { formNode = formNodes[i].Id; NodeChanged(); });
             b.AddChild(nodePick);
@@ -71,6 +77,10 @@ namespace SiliconeTycoon.UI
             verifSpin = Ui.Spin(DesignOps.MinVerification * 100, DesignOps.MaxVerification * 100, 5, 30, v => Reanalyze(), "", "%");
             verifSpin.TooltipText = "Share of engineering time spent testing before tape-out. More means fewer bugs, but a longer project.";
             tune.AddChild(verifSpin);
+            tune.AddChild(Ui.L("Timing closure", 13, Ui.Muted));
+            timingSpin = Ui.Spin(0, DesignLab.MaxTimingEffort * 100, 5, 0, v => Reanalyze(), "+", "%");
+            timingSpin.TooltipText = "Extra engineering spent closing timing: each 10% raises the clock a typical die reaches by 5%, but adds 15% to the design effort.";
+            tune.AddChild(timingSpin);
             b.AddChild(tune);
             planBox = Ui.V(3);
             b.AddChild(planBox);
@@ -133,6 +143,8 @@ namespace SiliconeTycoon.UI
             head.AddChild(Ui.L(stage, 14, c.Stage == DesignStage.Validated ? Ui.Warn : c.Stage == DesignStage.Released ? Ui.Ok : Ui.Accent));
             b.AddChild(head);
             b.AddChild(StatsLine(c.Stats));
+            var chipFeatures = Features.Of(D, c);
+            if (chipFeatures.Count > 0) b.AddChild(Ui.L("Features: " + Features.List(chipFeatures.OrderBy(x => x)), 12, Ui.Muted));
             var tools = Ui.H(8);
             bool open = showPlan.Contains(c.Id);
             tools.AddChild(Ui.Btn(open ? "Hide floorplan" : "Floorplan", () => { if (!showPlan.Remove(c.Id)) showPlan.Add(c.Id); Refresh(); }));
@@ -207,6 +219,7 @@ namespace SiliconeTycoon.UI
                 Fill(segPick, formSegs.Select(x => x.Name).ToArray(), formSegs.FindIndex(x => x.Id == formSeg));
                 Fill(nodePick, formNodes.Select(x => x.Name + (S.Fabs.Any(f => f.NodeId == x.Id && f.Stage != FabStage.Closed) ? "" : " (no fab)")).ToArray(), formNodes.FindIndex(x => x.Id == formNode));
             }
+            RefreshBriefs();
             if (string.IsNullOrWhiteSpace(nameEdit.Text)) nameEdit.Text = $"{S.CompanyName.Substring(0, Math.Min(2, S.CompanyName.Length)).ToUpperInvariant()}-{S.Designs.Count + 1}";
             if (draft == null) Replan();
             else if (draft.NodeId != formNode) NodeChanged();
@@ -223,6 +236,27 @@ namespace SiliconeTycoon.UI
 
         string planWhy;
 
+        Rfq BriefRfq => formRfq == null ? null : S.Rfqs.FirstOrDefault(r => r.Id == formRfq);
+
+        /// <summary>The brief the design house works to: the market as a whole, or one customer's request.</summary>
+        ChipSpec Brief()
+        {
+            var seg = D.Segment(formSeg);
+            if (seg == null) return null;
+            var r = BriefRfq;
+            return r != null ? ChipSpec.ForRfq(D, r) : ChipSpec.ForSegment(seg, S.YearF);
+        }
+
+        void RefreshBriefs()
+        {
+            var rfqs = S.Rfqs.Where(r => r.SegmentId == formSeg).OrderBy(r => r.CloseMonth).ToList();
+            if (formRfq != null && !rfqs.Any(r => r.Id == formRfq)) formRfq = null;
+            if (rfqs.Select(r => r.Id).SequenceEqual(formRfqs.Select(r => r.Id)) && briefPick.ItemCount == rfqs.Count + 1) return;
+            formRfqs = rfqs;
+            var names = new[] { "The market as a whole" }.Concat(rfqs.Select(r => $"{D.Customer(r.CustomerId)?.Name}'s request (bids close {Calendar.DateLabel(r.CloseMonth * Calendar.WeeksPerMonth)})")).ToArray();
+            Fill(briefPick, names, formRfq == null ? 0 : 1 + rfqs.FindIndex(r => r.Id == formRfq));
+        }
+
         /// <summary>A design house plan is redone for the new node; a hand layout keeps its blocks, resized for the node.</summary>
         void NodeChanged()
         {
@@ -236,9 +270,9 @@ namespace SiliconeTycoon.UI
         void Replan()
         {
             if (S == null || planBox == null) return;
-            var seg = D.Segment(formSeg);
             planWhy = null;
-            draft = seg == null || formNode == null ? null : DesignLab.PlanForSegment(D, S, formNode, seg.Metric, nameEdit.Text, out planWhy, maxPowerW: seg.MaxPowerW);
+            var brief = Brief();
+            draft = brief == null || formNode == null ? null : DesignLab.PlanForSpec(D, S, formNode, brief, nameEdit.Text, out planWhy);
             if (draft != null && clockSpin != null) clockSpin.SetValueNoSignal(draft.TargetClockMHz);
             Reanalyze();
             RefreshEditor();
@@ -257,8 +291,10 @@ namespace SiliconeTycoon.UI
             }
             draft.TargetClockMHz = clockSpin.Value;
             draft.Verification = verifSpin.Value / 100.0;
+            draft.TimingEffort = timingSpin.Value / 100.0;
             var st = DesignLab.Analyze(D, S, draft);
             draft.Stats = st;
+            if (canvas != null) { canvas.Stats = st; canvas.QueueRedraw(); }
             if (!editing)
             {
                 var edit = Ui.H(8);
@@ -274,9 +310,29 @@ namespace SiliconeTycoon.UI
             planBox.AddChild(Ui.L(string.Join(" + ", draft.Blocks.Select(p => D.Block(p.BlockId).Name)), 13, Ui.Fg));
             planBox.AddChild(Ui.Row("Package", D.Package(draft.PackageId)?.Name ?? "—"));
             planBox.AddChild(Ui.Row("Transistors", $"{st.Transistors:N0}"));
+            planBox.AddChild(Ui.Row("Features", st.Features.Count == 0 ? "none" : Features.List(st.Features)));
+            planBox.AddChild(Ui.Row("Pins", $"{st.PinsNeeded} needed · {st.PadsSupplied} pads · {st.PackagePins}-pin package"));
+            if (st.RamBytes > 0 || st.RomBytes > 0) planBox.AddChild(Ui.Row("Memory", $"{st.RamBytes:N0} B RAM · {st.RomBytes:N0} B ROM"));
             planBox.AddChild(Ui.Row("Die", $"{draft.DieW:0.00} × {draft.DieH:0.00} mm = {st.DieAreaMm2:0.0} mm² ({st.Utilisation:P0} used)"));
             planBox.AddChild(Ui.Row("Clock", $"{st.ClockMHz:0.00} MHz rated, {st.MaxClockMHz:0.00} typical"));
             planBox.AddChild(Ui.Row("Power", $"{st.PowerW:0.00} W (market limit {seg.MaxPowerW:0.#} W)", st.PowerW > seg.MaxPowerW ? Ui.Bad : null));
+            if (!double.IsInfinity(st.HeatLimit))
+                planBox.AddChild(Ui.Row("Hottest spot", $"{st.PeakHeat:0.000} of {st.HeatLimit:0.00} W/mm² (heat allows {Math.Min(st.ThermalClockMHz, 999):0.00} MHz)", st.PeakHeat > st.HeatLimit ? Ui.Bad : st.PeakHeat > st.HeatLimit * 0.85 ? Ui.Warn : null));
+            if (st.CongestionLoss > 0) planBox.AddChild(Ui.Row("Routing congestion", $"−{st.CongestionLoss:P0} clock at {st.Utilisation:P0} full", Ui.Warn));
+            if (st.LongestWire != null && st.LongestWireMm > 0.05) planBox.AddChild(Ui.Row("Slowest wire", $"{st.LongestWire}: {st.LongestWireMm:0.00} mm weighted"));
+            var wantsNow = seg.WantsAt(S.YearF).ToList();
+            var lacking = wantsNow.Where(w => !st.Features.Contains(w.Feature)).ToList();
+            if (lacking.Count > 0)
+                planBox.AddChild(Ui.Wrap($"Buyers mark it down for lacking {string.Join(", ", lacking.Select(w => $"{Features.Name(w.Feature)} (−{w.Weight:P0})"))}." +
+                                         (seg.RequiredAt(S.YearF).Any(f => !st.Features.Contains(f)) ? " Distributors won't stock it without " + Features.List(seg.RequiredAt(S.YearF).Where(f => !st.Features.Contains(f))) + "." : ""), 12, Ui.Warn));
+            var briefRfq = BriefRfq;
+            if (briefRfq != null)
+            {
+                var gaps = Specs.Check(D, ChipSpec.ForRfq(D, briefRfq), draft, Binning.BinsFor(draft)[0].Name);
+                planBox.AddChild(gaps.Count == 0
+                    ? Ui.Wrap($"Meets {D.Customer(briefRfq.CustomerId)?.Name}'s request.", 12, Ui.Ok)
+                    : Ui.Wrap($"Doesn't meet {D.Customer(briefRfq.CustomerId)?.Name}'s request: the customer {string.Join("; ", gaps)}.", 12, Ui.Bad));
+            }
             double perf = Market.MetricOf(st, seg.Metric);
             double need = seg.NeedAt(S.YearF);
             planBox.AddChild(Ui.Row($"{seg.Metric}", $"{perf:0.00} (competitive today: {need:0.00}, next year: {seg.NeedAt(S.YearF + 1):0.00})", perf < need * Market.OpenMarketMinShare ? Ui.Bad : perf < need ? Ui.Warn : Ui.Ok));
@@ -358,6 +414,7 @@ namespace SiliconeTycoon.UI
             if (!show) return;
             canvas.Data = D;
             canvas.Chip = draft;
+            canvas.Stats = draft.Stats;
             if (draft.Blocks.All(p => p.Id != canvas.Selected)) canvas.Selected = null;
             canvas.QueueRedraw();
 
@@ -396,11 +453,31 @@ namespace SiliconeTycoon.UI
                 selRow.AddChild(Ui.L("Shape", 13, Ui.Muted));
                 selRow.AddChild(Ui.Spin(0.25, 4, 0.05, Math.Round(sel.Aspect, 2), v => { DesignLab.SetAspect(sel, v); Edited(); }, "", " wide/tall"));
                 selRow.AddChild(Ui.Btn("Turn", () => { DesignLab.SetAspect(sel, 1 / sel.Aspect); Edited(); }));
+                if (def != null && def.MaxPipeline > 1)
+                    selRow.AddChild(Ui.Spin(1, def.MaxPipeline, 1, sel.Pipeline, v => { sel.Pipeline = (int)v; Edited(); }, "", " stages"));
+                if (def != null && def.MaxScale > 1)
+                    selRow.AddChild(Ui.Spin(1, def.MaxScale, 1, sel.Scale, v => { sel.Scale = (int)v; Edited(); }, "×", def.Kind == BlockKind.MemoryInterface ? " wide" : " size"));
+                var cells = new[] { CellLibrary.Standard, CellLibrary.Fast, CellLibrary.Dense };
+                selRow.AddChild(Ui.Options(new[] { "Standard cells", "Fast cells", "Dense cells" }, Array.IndexOf(cells, sel.Cells), i => { sel.Cells = cells[i]; Edited(); }));
                 selRow.AddChild(Ui.Btn("Find a free spot", () => { DesignLab.PlaceFree(draft, sel); Edited(); }));
                 selRow.AddChild(Ui.Btn("Remove", () => { draft.Blocks.Remove(sel); canvas.Selected = null; Edited(); }));
             }
             else selRow.AddChild(Ui.L("Click a block to select it.", 12, Ui.Muted));
             editTools.AddChild(selRow);
+            if (sel != null && D.Block(sel.BlockId) is BlockDef sd)
+            {
+                var e = DesignLab.Eff(sd, sel);
+                var bits = new List<string>();
+                if (sd.Kind == BlockKind.Core) bits.Add($"{e.Ipc:0.00} instructions per clock");
+                if (e.RamBytes > 0) bits.Add($"{e.RamBytes:N0} B RAM");
+                if (e.RomBytes > 0) bits.Add($"{e.RomBytes:N0} B ROM");
+                if (e.BytesPerClock > 0) bits.Add($"{e.BytesPerClock:0.##} bytes per clock");
+                if (e.Pins > 0) bits.Add($"{e.Pins} {(sd.Kind == BlockKind.Io ? "pads" : "pins")}");
+                bits.Add($"critical path ×{e.Depth:0.00}");
+                bits.Add($"{e.Transistors:N0} transistors");
+                if (sd.Features.Count > 0) bits.Add("gives " + Features.List(sd.Features));
+                editTools.AddChild(Ui.L(string.Join(" · ", bits), 12, Ui.Muted));
+            }
 
             // die and package
             var dieRow = Ui.H(8);
@@ -410,6 +487,9 @@ namespace SiliconeTycoon.UI
             dieRow.AddChild(Ui.Btn("Fit die to blocks", () => { DesignLab.FitDie(draft); Edited(); }, "Trim the die to the blocks' outline"));
             dieRow.AddChild(Ui.Btn("Design house layout", () => { DesignLab.AutoPlace(D, draft); Edited(true); }, "Let the design house re-pack these blocks (fee, 5% slower)"));
             dieRow.AddChild(Ui.Btn("Clear", () => { draft.Blocks.Clear(); canvas.Selected = null; Edited(); }));
+            var heatBox = new CheckBox { Text = "Show heat", ButtonPressed = canvas.ShowHeat };
+            heatBox.Toggled += on => { canvas.ShowHeat = on; canvas.QueueRedraw(); };
+            dieRow.AddChild(heatBox);
             editTools.AddChild(dieRow);
 
             var pkgs = D.Packages.Where(p => p.Year <= S.Year).OrderBy(p => p.Pins).ThenBy(p => p.Cost).ToList();
@@ -428,6 +508,9 @@ namespace SiliconeTycoon.UI
             binBox.AddChild(Ui.Heading("Speed and harvest bins"));
             binBox.AddChild(Ui.Wrap("Dies go into the first bin they qualify for, best first. A bin can accept dies with a core or graphics unit switched off by a defect, or dies that only reach a lower clock. With no bins, every working die at the rated clock is \"Standard\".", 12, Ui.Muted));
             var st = draft.Stats;
+            // features that a defect can switch off (so a bin can take dies without them)
+            var harvestable = draft.Blocks.Select(p => D.Block(p.BlockId)).Where(b => b != null && b.Disableable && b.Kind != BlockKind.Core)
+                                   .SelectMany(b => b.Features).Distinct().ToList();
             for (int i = 0; i < draft.Bins.Count; i++)
             {
                 var bin = draft.Bins[i];
@@ -439,6 +522,20 @@ namespace SiliconeTycoon.UI
                 row.AddChild(Ui.Spin(0, Math.Max(bin.MinCores, st?.Cores ?? 0), 1, bin.MinCores, v => { bin.MinCores = (int)v; RefreshBinsLater(); }, "", " cores"));
                 row.AddChild(Ui.Spin(0, Math.Max(bin.MinGraphics, st?.GraphicsUnits ?? 0), 1, bin.MinGraphics, v => { bin.MinGraphics = (int)v; RefreshBinsLater(); }, "", " graphics"));
                 row.AddChild(Ui.Spin(0, 100, 0.05, bin.MinClockMHz, v => { bin.MinClockMHz = v; RefreshBinsLater(); }, "at least ", " MHz"));
+                foreach (var f in harvestable)
+                {
+                    var tick = new CheckBox { Text = Features.Name(f), ButtonPressed = bin.Features == null || bin.Features.Contains(f) };
+                    tick.TooltipText = "Only dies that still have this feature go in this bin";
+                    tick.Toggled += on =>
+                    {
+                        var list = bin.Features ?? Features.Of(D, draft).ToList();
+                        list.Remove(f);
+                        if (on) list.Add(f);
+                        bin.Features = list;
+                        RefreshBinsLater();
+                    };
+                    row.AddChild(tick);
+                }
                 if (idx > 0) row.AddChild(Ui.Btn("Up", () => { draft.Bins.RemoveAt(idx); draft.Bins.Insert(idx - 1, bin); RefreshBinsLater(); }));
                 row.AddChild(Ui.Btn("Remove", () => { draft.Bins.RemoveAt(idx); RefreshBinsLater(); }));
                 binBox.AddChild(row);
@@ -481,6 +578,7 @@ namespace SiliconeTycoon.UI
             draft.Name = nameEdit.Text;
             draft.TargetClockMHz = clockSpin.Value;
             draft.Verification = verifSpin.Value / 100.0;
+            draft.TimingEffort = timingSpin.Value / 100.0;
             string err = DesignOps.StartDesign(D, S, draft, team.Id);
             if (err == null)
             {

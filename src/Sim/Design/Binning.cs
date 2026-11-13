@@ -47,6 +47,10 @@ namespace SiliconeTycoon.Sim
             public double Mean;
             public double Typical;
             public double Alpha;
+            /// <summary>Spare-row repairs each placed block can make (after its size setting).</summary>
+            public int[] RepairCap;
+            /// <summary>Everything the chip provides when every block works.</summary>
+            public HashSet<string> AllFeatures;
             internal bool[] Dead;
             internal int[] Repaired;
 
@@ -55,6 +59,8 @@ namespace SiliconeTycoon.Sim
                 Chip = c;
                 Bins = BinsFor(c);
                 Defs = c.Blocks.Select(p => d.Block(p.BlockId)).ToArray();
+                RepairCap = c.Blocks.Select((p, i) => DesignLab.Eff(Defs[i], p).Repair).ToArray();
+                AllFeatures = new HashSet<string>(Defs.SelectMany(b => b.Features));
                 CoresTotal = Defs.Count(b => b.Kind == BlockKind.Core);
                 Mean = d0 * c.DieAreaMm2 / 100.0;
                 Typical = c.Stats?.MaxClockMHz ?? 0;
@@ -86,7 +92,7 @@ namespace SiliconeTycoon.Sim
                     if (placed[b].Contains(x, y)) { hit = b; break; }
                 DefectEffect effect;
                 if (hit < 0) effect = DefectEffect.Harmless;                                        // empty silicon
-                else if (m.Repaired[hit] < m.Defs[hit].RepairCapacity) { m.Repaired[hit]++; effect = DefectEffect.Repaired; }
+                else if (m.Repaired[hit] < m.RepairCap[hit]) { m.Repaired[hit]++; effect = DefectEffect.Repaired; }
                 else if (m.Defs[hit].Disableable) { m.Dead[hit] = true; effect = DefectEffect.Disabled; }
                 else { fatal = true; effect = DefectEffect.Fatal; }
                 record?.Add(new Defect { X = x, Y = y, Effect = effect });
@@ -94,16 +100,25 @@ namespace SiliconeTycoon.Sim
 
             if (fatal) return Scrap;
             int cores = 0, gfx = 0;
+            bool anyDead = false;
             for (int b = 0; b < placed.Count; b++)
             {
-                if (m.Dead[b]) continue;
+                if (m.Dead[b]) { anyDead = true; continue; }
                 if (m.Defs[b].Kind == BlockKind.Core) cores++;
                 else if (m.Defs[b].Kind == BlockKind.Graphics) gfx++;
             }
             if (m.CoresTotal > 0 && cores == 0) return Scrap;
+            HashSet<string> live = m.AllFeatures;
+            if (anyDead)
+            {
+                live = new HashSet<string>();
+                for (int b = 0; b < placed.Count; b++)
+                    if (!m.Dead[b]) live.UnionWith(m.Defs[b].Features);
+            }
             double speed = m.Typical * (1 + rng.Normal(0, SpeedSigma));
             foreach (var b in m.Bins)
-                if (cores >= b.MinCores && gfx >= b.MinGraphics && speed >= b.MinClockMHz) return b.Name;
+                if (cores >= b.MinCores && gfx >= b.MinGraphics && speed >= b.MinClockMHz
+                    && (b.Features ?? (IEnumerable<string>)m.AllFeatures).All(live.Contains)) return b.Name;
             return Scrap;
         }
 

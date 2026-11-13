@@ -51,6 +51,12 @@ namespace SiliconeTycoon.Sim
         public double MaxPrice;
         public double ExpectedPrice;
         public double EstimatedUnits;
+        /// <summary>Most package pins the customer's board takes (0 = no limit).</summary>
+        public int MaxPins;
+        /// <summary>Lowest clock the customer's product works at (0 = none).</summary>
+        public double MinClockMHz;
+        /// <summary>Features the chip must have.</summary>
+        public List<string> Features = new List<string>();
         public List<Bid> Bids = new List<Bid>();
     }
 

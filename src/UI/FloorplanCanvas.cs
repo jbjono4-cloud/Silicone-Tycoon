@@ -15,6 +15,10 @@ namespace SiliconeTycoon.UI
         public GameData Data;
         public ChipDesign Chip;
         public bool Editable;
+        /// <summary>Tint blocks by how close they run to the package's heat limit.</summary>
+        public bool ShowHeat;
+        /// <summary>Analysis of the chip (for heat); optional.</summary>
+        public DesignStats Stats;
         public string Selected;
         /// <summary>The floorplan changed (after a drag, turn or reshape).</summary>
         public Action Changed;
@@ -94,20 +98,17 @@ namespace SiliconeTycoon.UI
 
             var defs = Chip.Blocks.Select(p => (p, b: Data.Block(p.BlockId))).Where(x => x.b != null).ToList();
 
-            // wires from each core to its nearest partner of each kind
-            foreach (var core in defs.Where(x => x.b.Kind == BlockKind.Core))
-                foreach (var kind in new[] { BlockKind.Ram, BlockKind.Rom, BlockKind.MemoryInterface, BlockKind.Graphics })
-                {
-                    var partners = defs.Where(x => x.b.Kind == kind).ToList();
-                    if (partners.Count == 0) continue;
-                    var near = partners.OrderBy(x => DesignLab.Gap(core.p, x.p)).First();
-                    double gap = DesignLab.Gap(core.p, near.p);
-                    var a = RectOf(core.p).GetCenter();
-                    var b = RectOf(near.p).GetCenter();
-                    var col = gap <= 1e-6 ? new Color(Ui.Ok, 0.5f) : gap < 0.5 ? new Color(Ui.Warn, 0.7f) : new Color(Ui.Bad, 0.8f);
-                    DrawDashedLine(a, b, col, 1.5f, 5);
-                    if (gap > 1e-6) DrawString(font, (a + b) / 2 + new Vector2(3, -3), $"{gap:0.00} mm", HorizontalAlignment.Left, -1, 10, col);
-                }
+            // the busy links; colour by how much clock they cost (gap × how busy the link is)
+            foreach (var (pa, pb, w) in DesignLab.Connections(Data, Chip))
+            {
+                double gap = DesignLab.Gap(pa, pb);
+                double cost = gap * w;
+                var a = RectOf(pa).GetCenter();
+                var b = RectOf(pb).GetCenter();
+                var col = gap <= 1e-6 ? new Color(Ui.Ok, 0.35f) : cost < 0.5 ? new Color(Ui.Warn, 0.6f) : new Color(Ui.Bad, 0.8f);
+                DrawDashedLine(a, b, col, w >= 0.75 ? 1.8f : 1f, 5);
+                if (cost > 0.3) DrawString(font, (a + b) / 2 + new Vector2(3, -3), $"{gap:0.00} mm", HorizontalAlignment.Left, -1, 10, col);
+            }
 
             foreach (var (p, b) in defs)
             {
@@ -116,15 +117,32 @@ namespace SiliconeTycoon.UI
                            || (b.Kind == BlockKind.Io && !DesignLab.OnEdge(Chip, p));
                 var col = KindColor(b.Kind);
                 DrawRect(r, new Color(col, b.Kind == BlockKind.Io ? 0.35f : 0.55f));
+                if (ShowHeat && Stats != null && Stats.HeatLimit > 0 && !double.IsInfinity(Stats.HeatLimit) && Stats.BlockHeat.TryGetValue(p.Id ?? "", out var heat))
+                {
+                    float t = (float)Math.Clamp(heat / Stats.HeatLimit, 0, 1.2);
+                    DrawRect(r, new Color(1f, 0.25f, 0.1f, Math.Min(0.85f, t * 0.7f)));
+                    if (r.Size.X > 40 && r.Size.Y > 40) DrawString(font, r.Position + new Vector2(4, 39), $"{heat / Stats.HeatLimit:P0} heat", HorizontalAlignment.Left, r.Size.X - 6, 10, t > 1 ? Colors.White : Ui.Fg);
+                }
                 DrawRect(r, bad ? Ui.Bad : p.Id == Selected ? Colors.White : col, false, p.Id == Selected || bad ? 2.5f : 1);
-                if (b.RepairCapacity > 0 && r.Size.Y > 24) DrawString(font, r.Position + new Vector2(4, r.Size.Y - 5), $"{b.RepairCapacity} spare", HorizontalAlignment.Left, -1, 10, Ui.Muted);
+                int spare = DesignLab.Eff(b, p).Repair;
+                if (spare > 0 && r.Size.Y > 24) DrawString(font, r.Position + new Vector2(4, r.Size.Y - 5), $"{spare} spare", HorizontalAlignment.Left, -1, 10, Ui.Muted);
                 if (r.Size.X > 30 && r.Size.Y > 14)
                 {
-                    string label = Short(b);
+                    string label = Short(b) + Tuning(b, p);
                     DrawString(font, r.Position + new Vector2(4, 13), label, HorizontalAlignment.Left, r.Size.X - 6, 11, Ui.Fg);
                     if (r.Size.Y > 28) DrawString(font, r.Position + new Vector2(4, 26), $"{p.W * p.H:0.0} mm²", HorizontalAlignment.Left, r.Size.X - 6, 10, Ui.Muted);
                 }
             }
+        }
+
+        static string Tuning(BlockDef b, PlacedBlock p)
+        {
+            var parts = new List<string>();
+            if (p.Pipeline > 1) parts.Add($"{p.Pipeline}-stage");
+            if (p.Scale > 1) parts.Add($"×{p.Scale}");
+            if (p.Cells == CellLibrary.Fast) parts.Add("fast");
+            else if (p.Cells == CellLibrary.Dense) parts.Add("dense");
+            return parts.Count == 0 ? "" : " (" + string.Join(", ", parts) + ")";
         }
 
         static string Short(BlockDef b) => b.Kind switch
@@ -147,8 +165,11 @@ namespace SiliconeTycoon.UI
             var p = HitTest(atPosition);
             var b = p == null ? null : Data.Block(p.BlockId);
             if (b == null) return Editable ? "Drag blocks to move them. Right-click turns a block; scroll over the selected block to reshape it." : "";
-            string extra = b.RepairCapacity > 0 ? $" · spare rows repair {b.RepairCapacity} defect(s)" : b.Disableable ? " · can be switched off if a defect hits it" : "";
-            return $"{b.Name}: {p.W:0.00} × {p.H:0.00} mm ({p.W * p.H:0.00} mm²) at ({p.X:0.00}, {p.Y:0.00}){extra}\n{b.Description}";
+            var e = DesignLab.Eff(b, p);
+            string extra = e.Repair > 0 ? $" · spare rows repair {e.Repair} defect(s)" : b.Disableable ? " · can be switched off if a defect hits it" : "";
+            string feats = b.Features.Count > 0 ? $"\nGives: {Features.List(b.Features)}" : "";
+            string heat = Stats != null && Stats.BlockHeat.TryGetValue(p.Id ?? "", out var h) ? $"\nHeat {h:0.000} W/mm² of {Stats.HeatLimit:0.00} the package takes" : "";
+            return $"{b.Name}{Tuning(b, p)}: {p.W:0.00} × {p.H:0.00} mm ({p.W * p.H:0.00} mm²) at ({p.X:0.00}, {p.Y:0.00}){extra}{feats}{heat}\n{b.Description}";
         }
 
         public override void _GuiInput(InputEvent e)

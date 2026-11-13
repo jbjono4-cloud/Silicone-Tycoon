@@ -1,23 +1,69 @@
 [
   {
-    "Id": "embedded", "Name": "Calculators and controllers", "From": 1970, "Metric": "Control",
-    "MaxPowerW": 1.0, "OpenShare": 0.4, "PriceSensitivity": 1.6, "PerfWeight": 0.6,
+    "Id": "embedded",
+    "Name": "Calculators and controllers",
+    "From": 1970,
+    "Metric": "Control",
+    "MaxPowerW": 1.0,
+    "OpenShare": 0.4,
+    "PriceSensitivity": 1.6,
+    "PerfWeight": 0.6,
     "Demand": [[1970, 20000], [1973, 300000], [1976, 1500000], [1980, 3000000], [1985, 8000000]],
-    "Price":  [[1970, 25], [1972, 18], [1974, 10], [1976, 6], [1980, 3], [1985, 2]],
-    "Need":   [[1970, 0.05], [1973, 0.08], [1976, 0.15], [1980, 0.5], [1985, 2.0]]
+    "Price": [[1970, 25], [1972, 18], [1974, 10], [1976, 6], [1980, 3], [1985, 2]],
+    "Need": [[1970, 0.05], [1973, 0.08], [1976, 0.15], [1980, 0.5], [1985, 2.0]],
+    "Wants": [
+      {"Feature": "keyboard", "From": 1970, "Weight": 0.2, "RequiredFrom": 1972},
+      {"Feature": "display", "From": 1971, "Weight": 0.2, "RequiredFrom": 1973},
+      {"Feature": "timers", "From": 1974, "Weight": 0.15},
+      {"Feature": "interrupts", "From": 1977, "Weight": 0.1},
+      {"Feature": "analog", "From": 1979, "Weight": 0.15},
+      {"Feature": "serial", "From": 1981, "Weight": 0.1}
+    ],
+    "MaxPins": 40
   },
   {
-    "Id": "home", "Name": "Home computers", "From": 1976, "Metric": "Compute",
-    "MaxPowerW": 2.5, "OpenShare": 0.3, "PriceSensitivity": 1.2, "PerfWeight": 1.2,
+    "Id": "home",
+    "Name": "Home computers",
+    "From": 1976,
+    "Metric": "Compute",
+    "MaxPowerW": 2.5,
+    "OpenShare": 0.3,
+    "PriceSensitivity": 1.2,
+    "PerfWeight": 1.2,
     "Demand": [[1976, 5000], [1978, 60000], [1980, 150000], [1983, 600000], [1985, 500000]],
-    "Price":  [[1976, 60], [1980, 25], [1985, 30]],
-    "Need":   [[1976, 0.3], [1980, 1.5], [1983, 4.0], [1985, 10.0]]
+    "Price": [[1976, 60], [1980, 25], [1985, 30]],
+    "Need": [[1976, 0.3], [1980, 1.5], [1983, 4.0], [1985, 10.0]],
+    "Wants": [
+      {"Feature": "8-bit", "From": 1976, "Weight": 0.5, "RequiredFrom": 1976},
+      {"Feature": "dram", "From": 1978, "Weight": 0.2},
+      {"Feature": "interrupts", "From": 1978, "Weight": 0.1},
+      {"Feature": "16-bit", "From": 1981, "Weight": 0.3, "RequiredFrom": 1985},
+      {"Feature": "multiply", "From": 1980, "Weight": 0.1},
+      {"Feature": "dma", "From": 1982, "Weight": 0.1},
+      {"Feature": "fpu", "From": 1983, "Weight": 0.1},
+      {"Feature": "mmu", "From": 1984, "Weight": 0.1}
+    ],
+    "MaxPins": 68
   },
   {
-    "Id": "consoles", "Name": "Games consoles", "From": 1976, "Metric": "Graphics",
-    "MaxPowerW": 2.0, "OpenShare": 0.2, "PriceSensitivity": 1.5, "PerfWeight": 1.0,
+    "Id": "consoles",
+    "Name": "Games consoles",
+    "From": 1976,
+    "Metric": "Graphics",
+    "MaxPowerW": 2.0,
+    "OpenShare": 0.2,
+    "PriceSensitivity": 1.5,
+    "PerfWeight": 1.0,
     "Demand": [[1976, 10000], [1978, 80000], [1981, 400000], [1982.5, 700000], [1983.5, 120000], [1985, 300000]],
-    "Price":  [[1976, 20], [1980, 12], [1985, 10]],
-    "Need":   [[1976, 0.3], [1980, 1.5], [1985, 6.0]]
+    "Price": [[1976, 20], [1980, 12], [1985, 10]],
+    "Need": [[1976, 0.3], [1980, 1.5], [1985, 6.0]],
+    "Wants": [
+      {"Feature": "video", "From": 1976, "Weight": 0.5, "RequiredFrom": 1976},
+      {"Feature": "8-bit", "From": 1976, "Weight": 0.1},
+      {"Feature": "sprites", "From": 1978, "Weight": 0.3, "RequiredFrom": 1981},
+      {"Feature": "sound", "From": 1979, "Weight": 0.25},
+      {"Feature": "tiles", "From": 1983, "Weight": 0.3}
+    ],
+    "MaxPins": 68
   }
 ]

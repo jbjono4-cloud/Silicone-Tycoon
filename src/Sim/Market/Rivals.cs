@@ -92,9 +92,8 @@ namespace SiliconeTycoon.Sim
         public static RivalProduct OpenMarketOffer(GameData d, GameState s, RivalState r, SegmentDef seg)
         {
             if (!Serves(d, r, seg)) return null;
-            double need = seg.NeedAt(s.YearF);
             return r.Products
-                .Where(p => Market.Perf(p.Design, BinOf(p), seg.Metric) >= need * Market.OpenMarketMinShare && Market.Power(p.Design, BinOf(p)) <= seg.MaxPowerW)
+                .Where(p => Market.Qualifies(d, seg, p.Design, BinOf(p), s.YearF))
                 .OrderByDescending(p => Market.Perf(p.Design, BinOf(p), seg.Metric) / Price(s, r, p, seg))
                 .FirstOrDefault();
         }
@@ -108,9 +107,9 @@ namespace SiliconeTycoon.Sim
                 foreach (var r in s.Rivals)
                 {
                     if (!Serves(d, r, seg) || rfq.Bids.Any(b => b.BidderId == r.Id)) continue;
+                    var spec = ChipSpec.ForRfq(d, rfq);
                     var p = r.Products
-                        .Where(x => Market.Perf(x.Design, BinOf(x), seg.Metric) >= rfq.MinMetric
-                                    && Market.Power(x.Design, BinOf(x)) <= rfq.MaxPowerW
+                        .Where(x => Specs.Check(d, spec, x.Design, BinOf(x)).Count == 0
                                     && Cost(s, x) * MinMarkup <= rfq.MaxPrice)
                         .OrderByDescending(x => Market.Perf(x.Design, BinOf(x), seg.Metric) / Cost(s, x))
                         .FirstOrDefault();

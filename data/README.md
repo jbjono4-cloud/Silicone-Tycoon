@@ -40,18 +40,25 @@ Indexes are relative to the United States = 1.0. `Subsidy` is the share of fab c
 | `Ipc`, `Graphics`, `BytesPerClock`, `RamBytes`, `RomBytes` | Performance inputs |
 | `RepairCapacity` | Defects spare rows can repair |
 | `Disableable` | A defect switches the block off instead of killing the die (harvesting) |
+| `Features` | Feature ids the block gives the chip (see `src/Sim/Design/Features.cs` for the list) |
+| `MaxPipeline` | Cores: most pipeline stages a design can choose (each stage: shorter critical path, less work per clock, more logic) |
+| `MaxScale` | RAM/ROM: size multiple; memory interfaces: width multiple (more bandwidth and pins) |
+| `ComputeBoost`, `ControlBoost`, `BandwidthBoost` | Extra compute, control performance or effective memory bandwidth, as a share |
+| `WireWeight` | How much a mm of wire from a core to this block costs in clock (0 = default for its kind) |
+
+`Kind` can also be `Peripheral` (timers, serial ports, FPUs and so on).
 
 ## packages.json
 
-`Pins`, `MaxPowerW` and `MaxDieMm2` limit what fits; `Cost` (1970 dollars) is added per chip; `Yield` is the share surviving assembly.
+`Pins`, `MaxPowerW` and `MaxDieMm2` limit what fits; `MaxWPerMm2` is the heat the package can draw from the hottest spot; `Cost` (1970 dollars) is added per chip; `Yield` is the share surviving assembly.
 
 ## segments.json
 
-`Demand` (chips a month), `Price` (1970 dollars per chip) and `Need` (performance a competitive chip has, in the segment's `Metric`: `Control`, `Compute` or `Graphics`) are `[[year, value], ...]` tables. `OpenShare` is the share bought through distributors; `PriceSensitivity` and `PerfWeight` shape how buyers score chips; `MaxPowerW` is what customers' products can cool.
+`Demand` (chips a month), `Price` (1970 dollars per chip) and `Need` (performance a competitive chip has, in the segment's `Metric`: `Control`, `Compute` or `Graphics`) are `[[year, value], ...]` tables. `OpenShare` is the share bought through distributors; `PriceSensitivity` and `PerfWeight` shape how buyers score chips; `MaxPowerW` is what customers' products can cool and `MaxPins` the biggest package boards take. `Wants` lists features buyers look for: `{Feature, From, Weight, RequiredFrom}` — lacking one multiplies a chip's appeal by `1 - Weight`; from `RequiredFrom` distributors won't stock chips without it and requests insist on it.
 
 ## customers.json
 
-`Share` of the segment each buys, `CycleMonths` (product generation and contract length), `LeadMonths` from award to first delivery, `PriceSensitivity` (multiplies the segment's), `Loyalty` (score bonus for the current supplier). Shares plus the segment's `OpenShare` must not exceed 100%.
+`Share` of the segment each buys, `CycleMonths` (product generation and contract length), `LeadMonths` from award to first delivery, `PriceSensitivity` (multiplies the segment's), `Loyalty` (score bonus for the current supplier), `MaxPins` (biggest package their board takes), `Needs` (`{Feature, From}` they insist on beyond their market's must-haves) and `MinClock` (`[[year, MHz], ...]`, lowest clock their product works at). Shares plus the segment's `OpenShare` must not exceed 100%.
 
 ## rivals.json
 

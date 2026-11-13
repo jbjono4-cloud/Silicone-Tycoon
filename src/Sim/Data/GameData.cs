@@ -70,7 +70,7 @@ namespace SiliconeTycoon.Sim
         public double PoliticalRisk;
     }
 
-    public enum BlockKind { Core, Ram, Rom, MemoryInterface, Io, Graphics }
+    public enum BlockKind { Core, Ram, Rom, MemoryInterface, Io, Graphics, Peripheral }
 
     /// <summary>A functional block a chip can be built from. Transistor counts set its area on each node.</summary>
     public class BlockDef
@@ -103,6 +103,20 @@ namespace SiliconeTycoon.Sim
         /// <summary>If true, a defect switches this block off instead of killing the die (core and unit harvesting).</summary>
         public bool Disableable;
         public string Description;
+        /// <summary>What the block gives the chip that markets and customers ask for (see <see cref="Features"/>).</summary>
+        public List<string> Features = new List<string>();
+        /// <summary>Cores: most pipeline stages a design can split the core into.</summary>
+        public int MaxPipeline = 1;
+        /// <summary>RAM, ROM and memory interfaces: how many times bigger (or wider) a design can make the block.</summary>
+        public int MaxScale = 1;
+        /// <summary>Extra compute (share) this block adds, e.g. an FPU or multiplier.</summary>
+        public double ComputeBoost;
+        /// <summary>Extra control performance (share), e.g. timers and interrupts.</summary>
+        public double ControlBoost;
+        /// <summary>Extra effective memory bandwidth (share), e.g. a prefetch queue or DMA.</summary>
+        public double BandwidthBoost;
+        /// <summary>How much the wire from a core to this block slows the clock (0 = use the default for its kind).</summary>
+        public double WireWeight;
 
         public double Transistors => LogicTransistors + SramTransistors;
     }
@@ -119,6 +133,8 @@ namespace SiliconeTycoon.Sim
         public double Cost;
         /// <summary>Share of good dies that survive assembly.</summary>
         public double Yield = 0.99;
+        /// <summary>Heat the package can draw out of the hottest spot on the die, W per mm².</summary>
+        public double MaxWPerMm2 = 0.15;
     }
 
     /// <summary>Static game data loaded from the JSON files in /data.</summary>
@@ -189,6 +205,9 @@ namespace SiliconeTycoon.Sim
                 if (b.LogicDepth <= 0) p.Add($"{b.Id}: LogicDepth must be positive");
                 if (b.Activity < 0 || b.Activity > 1) p.Add($"{b.Id}: Activity must be 0-1");
                 if (b.Kind == BlockKind.Io && b.Pins <= 0) p.Add($"{b.Id}: an I/O ring must supply pads");
+                if (b.MaxPipeline < 1 || b.MaxScale < 1) p.Add($"{b.Id}: MaxPipeline and MaxScale must be at least 1");
+                if (b.MaxPipeline > 1 && b.Kind != BlockKind.Core) p.Add($"{b.Id}: only cores can be pipelined");
+                foreach (var f in b.Features) if (!Sim.Features.Known(f)) p.Add($"{b.Id}: unknown feature {f}");
             }
             foreach (var g in Packages.GroupBy(k => k.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate package id {g.Key}");
             foreach (var k in Packages)
@@ -198,12 +217,16 @@ namespace SiliconeTycoon.Sim
             {
                 if (!Curves.Valid(x.Demand) || !Curves.Valid(x.Price) || !Curves.Valid(x.Need)) p.Add($"{x.Id}: Demand, Price and Need must be [[year, value], ...] in year order");
                 if (x.OpenShare < 0 || x.OpenShare > 1) p.Add($"{x.Id}: OpenShare must be 0-1");
+                foreach (var w in x.Wants)
+                    if (!Sim.Features.Known(w.Feature) || w.Weight < 0 || w.Weight >= 1) p.Add($"{x.Id}: bad wanted feature {w.Feature}");
             }
             foreach (var g in Customers.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate customer id {g.Key}");
             foreach (var x in Customers)
             {
                 if (Segment(x.SegmentId) == null) p.Add($"{x.Id}: unknown segment {x.SegmentId}");
                 if (x.Share <= 0 || x.Share > 1 || x.CycleMonths < 6 || x.LeadMonths < 1) p.Add($"{x.Id}: bad share, cycle or lead time");
+                foreach (var nd in x.Needs) if (!Sim.Features.Known(nd.Feature)) p.Add($"{x.Id}: unknown feature {nd.Feature}");
+                if (x.MinClock != null && !Curves.Valid(x.MinClock)) p.Add($"{x.Id}: MinClock must be [[year, MHz], ...]");
             }
             foreach (var seg in Segments)
             {

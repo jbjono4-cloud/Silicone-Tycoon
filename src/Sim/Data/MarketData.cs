@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace SiliconeTycoon.Sim
 {
@@ -35,6 +36,24 @@ namespace SiliconeTycoon.Sim
         }
     }
 
+    public class FeatureWant
+    {
+        public string Feature;
+        /// <summary>Year buyers start to care.</summary>
+        public int From;
+        /// <summary>Share of a chip's appeal lost without it.</summary>
+        public double Weight;
+        /// <summary>Year it becomes a must-have (0 = never).</summary>
+        public int RequiredFrom;
+    }
+
+    /// <summary>A feature a particular customer insists on from a year.</summary>
+    public class FeatureNeed
+    {
+        public string Feature;
+        public int From;
+    }
+
     /// <summary>A market for chips. Demand is chips per month; prices are 1970 dollars per chip.</summary>
     public class SegmentDef
     {
@@ -43,6 +62,8 @@ namespace SiliconeTycoon.Sim
         public int From = 1970;
         public Metric Metric;
         public double MaxPowerW = 2;
+        /// <summary>Most package pins typical boards in this market take.</summary>
+        public int MaxPins = 999;
         /// <summary>Share of demand bought through distributors (the open market) rather than design-win contracts.</summary>
         public double OpenShare = 0.3;
         public double PriceSensitivity = 1.2;
@@ -51,8 +72,12 @@ namespace SiliconeTycoon.Sim
         public double[][] Price;
         /// <summary>Performance a competitive chip delivers in that year, in the segment's metric.</summary>
         public double[][] Need;
+        /// <summary>Features buyers in this market look for: missing one costs score; from RequiredFrom it is a must.</summary>
+        public List<FeatureWant> Wants = new List<FeatureWant>();
 
         public bool Active(double year) => year >= From;
+        public IEnumerable<FeatureWant> WantsAt(double year) => Wants.Where(w => year >= w.From);
+        public IEnumerable<string> RequiredAt(double year) => Wants.Where(w => w.RequiredFrom > 0 && year >= w.RequiredFrom).Select(w => w.Feature);
         public double DemandAt(double year) => Active(year) ? Curves.At(Demand, year) : 0;
         public double PriceAt(double year) => Curves.At(Price, year);
         public double NeedAt(double year) => Curves.At(Need, year);
@@ -76,6 +101,12 @@ namespace SiliconeTycoon.Sim
         public double PriceSensitivity = 1;
         /// <summary>Score bonus for the current supplier.</summary>
         public double Loyalty = 0.1;
+        /// <summary>Most package pins the customer's board takes.</summary>
+        public int MaxPins = 999;
+        /// <summary>Features this customer insists on beyond what its market requires.</summary>
+        public List<FeatureNeed> Needs = new List<FeatureNeed>();
+        /// <summary>Lowest clock its product works at, [[year, MHz], ...]; null = no clock requirement.</summary>
+        public double[][] MinClock;
 
         public bool Active(int year) => year >= From && year <= To;
     }

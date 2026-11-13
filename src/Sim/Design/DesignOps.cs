@@ -39,8 +39,11 @@ namespace SiliconeTycoon.Sim
         /// <summary>Transistors one engineer can design and verify in a month; design tools improve it every year.</summary>
         public static double Productivity(double year) => 90 * Math.Pow(1.22, Math.Max(0, year - 1970));
 
+        /// <summary>Extra engineering per unit of timing-closure effort.</summary>
+        public const double TimingCost = 1.5;
+
         public static double BaseEngineerMonths(ChipDesign c, DesignStats st, double year) =>
-            st.Transistors * (1 + c.Verification) / Productivity(year);
+            st.Transistors * (1 + c.Verification) * (1 + TimingCost * Math.Clamp(c.TimingEffort, 0, DesignLab.MaxTimingEffort)) / Productivity(year);
 
         public static double EngineerMonths(ChipDesign c, DesignStats st, double year) =>
             BaseEngineerMonths(c, st, year) * (c.UseDesignHouse ? 1 - DesignHouseShare : 1);

@@ -99,6 +99,14 @@ namespace SiliconeTycoon.UI
             box.AddChild(head);
             box.AddChild(Ui.L($"Needs {seg.Metric.ToString().ToLower()} {r.MinMetric:0.00}+, under {r.MaxPowerW:0.#} W, at most {Format.Money(r.MaxPrice)} a chip (going rate {Format.Money(r.ExpectedPrice)}). " +
                               $"About {Ui.Units(r.EstimatedUnits)} a month for {r.LengthMonths} months from {Calendar.DateLabel(r.StartMonth * Calendar.WeeksPerMonth)}.", 13, Ui.Muted));
+            var spec = ChipSpec.ForRfq(D, r);
+            var reqs = new List<string>();
+            if (r.MinClockMHz > 0) reqs.Add($"runs at {r.MinClockMHz:0.##} MHz or faster");
+            if (r.MaxPins > 0 && r.MaxPins < 999) reqs.Add($"fits a board taking {r.MaxPins} pins at most");
+            if (r.Features.Count > 0) reqs.Add($"has {Features.List(r.Features)}");
+            if (reqs.Count > 0) box.AddChild(Ui.L("The chip must: " + string.Join(" · ", reqs), 13, Ui.Fg));
+            var nice = spec.Wanted.Except(r.Features).ToList();
+            if (nice.Count > 0) box.AddChild(Ui.L("Scores better with: " + Features.List(nice), 12, Ui.Muted));
 
             var mine = r.Bids.FirstOrDefault(x => x.BidderId == Market.Player);
             if (mine != null)
@@ -185,10 +193,11 @@ namespace SiliconeTycoon.UI
             foreach (var c in chips)
             {
                 b.AddChild(Ui.Title(c.Name, 15));
-                var fits = D.Segments.Where(seg => seg.Active(S.YearF)
-                                                   && Market.Perf(c, Binning.BinsFor(c)[0].Name, seg.Metric) >= seg.NeedAt(S.YearF) * Market.OpenMarketMinShare
-                                                   && Market.Power(c, Binning.BinsFor(c)[0].Name) <= seg.MaxPowerW).ToList();
-                b.AddChild(Ui.L(fits.Count == 0 ? "Distributors won't stock it any more: it's too far behind." : "Distributors stock it for: " + string.Join(", ", fits.Select(x => x.Name.ToLower())), 12, fits.Count == 0 ? Ui.Warn : Ui.Muted));
+                var fits = D.Segments.Where(seg => seg.Active(S.YearF) && Market.Qualifies(D, seg, c, Binning.BinsFor(c)[0].Name, S.YearF)).ToList();
+                b.AddChild(Ui.L(fits.Count == 0 ? "Distributors won't stock it: it's too far behind, too hot, or missing a feature buyers now insist on." : "Distributors stock it for: " + string.Join(", ", fits.Select(x => x.Name.ToLower())), 12, fits.Count == 0 ? Ui.Warn : Ui.Muted));
+                var missingWants = fits.SelectMany(seg => seg.WantsAt(S.YearF).Where(w => !Features.OfBin(D, c, Binning.BinsFor(c)[0].Name).Contains(w.Feature)).Select(w => (seg, w))).ToList();
+                if (missingWants.Count > 0)
+                    b.AddChild(Ui.L("Buyers mark it down for lacking: " + string.Join(", ", missingWants.Select(x => $"{Features.Name(x.w.Feature)} (−{x.w.Weight:P0} in {x.seg.Name.ToLower()})")), 12, Ui.Warn));
                 double held = S.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.Units);
                 if (held >= 1)
                 {

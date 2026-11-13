@@ -73,9 +73,7 @@ namespace SiliconeTycoon.Sim
                     }
 
                     var bin = Binning.BinsFor(c)[0].Name;
-                    var fits = d.Segments.Where(seg => seg.Active(s.YearF)
-                                                        && Market.Perf(c, bin, seg.Metric) >= seg.NeedAt(s.YearF) * Market.OpenMarketMinShare
-                                                        && Market.Power(c, bin) <= seg.MaxPowerW).ToList();
+                    var fits = d.Segments.Where(seg => seg.Active(s.YearF) && Market.Qualifies(d, seg, c, bin, s.YearF)).ToList();
                     var listing = s.Listings.FirstOrDefault(l => l.DesignId == c.Id);
                     if (stock >= 1000 && fits.Count == 0 && !s.Contracts.Any(k => k.DesignId == c.Id && k.Status == ContractStatus.Active))
                         Add(2, "Market", making

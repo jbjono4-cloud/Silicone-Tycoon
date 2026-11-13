@@ -81,11 +81,39 @@ namespace SiliconeTycoon.Sim
             return b != null && b.MinClockMHz > 0 ? b.MinClockMHz : c.Stats.ClockMHz;
         }
 
+        /// <summary>
+        /// Performance of chips sold in a bin: the chip's, scaled to the bin's clock and to the cores, graphics units and
+        /// features the bin guarantees (a die with a core or the FPU switched off does less).
+        /// </summary>
         public static double Perf(ChipDesign c, string bin, Metric m)
         {
-            if (c?.Stats == null || c.Stats.ClockMHz <= 0) return 0;
-            return MetricOf(c.Stats, m) * BinClock(c, bin) / c.Stats.ClockMHz;
+            var st = c?.Stats;
+            if (st == null || st.ClockMHz <= 0) return 0;
+            double v = MetricOf(st, m) * BinClock(c, bin) / st.ClockMHz;
+            var b = Binning.BinsFor(c).FirstOrDefault(x => x.Name == bin);
+            if (b == null) return v;
+            if (m != Metric.Graphics && st.Cores > 0 && b.MinCores < st.Cores) v *= Math.Max(0, b.MinCores) / (double)st.Cores;
+            if (m == Metric.Graphics && st.GraphicsUnits > 0 && b.MinGraphics < st.GraphicsUnits) v *= Math.Max(0, b.MinGraphics) / (double)st.GraphicsUnits;
+            if (m == Metric.Compute && b.Features != null && st.FeatureComputeBoost.Count > 0)
+            {
+                double lost = st.FeatureComputeBoost.Where(kv => !b.Features.Contains(kv.Key)).Sum(kv => kv.Value);
+                v *= (1 + st.ComputeBoost - lost) / (1 + st.ComputeBoost);
+            }
+            return v;
         }
+
+        /// <summary>Whether distributors in a market will stock chips from this bin: close enough to competitive, cool enough, and with the features the market insists on.</summary>
+        public static bool Qualifies(GameData d, SegmentDef seg, ChipDesign c, string bin, double year)
+        {
+            if (c?.Stats == null) return false;
+            if (Perf(c, bin, seg.Metric) < seg.NeedAt(year) * OpenMarketMinShare || Power(c, bin) > seg.MaxPowerW) return false;
+            var have = Features.OfBin(d, c, bin);
+            return seg.RequiredAt(year).All(have.Contains);
+        }
+
+        /// <summary>How a market rates a bin's features (1 = everything buyers want).</summary>
+        public static double FeatureFactor(GameData d, SegmentDef seg, ChipDesign c, string bin, double year) =>
+            c == null ? 1 : Features.Factor(seg, Features.OfBin(d, c, bin), year);
 
         public static double Power(ChipDesign c, string bin) =>
             c?.Stats == null || c.Stats.ClockMHz <= 0 ? 0 : c.Stats.PowerW * BinClock(c, bin) / c.Stats.ClockMHz;
@@ -159,6 +187,7 @@ namespace SiliconeTycoon.Sim
             if (c == null) return "Unknown chip.";
             if (!HasBin(c, bin)) return $"The {c.Name} has no {bin} bin.";
             if (price < 0) return "The price can't be negative.";
+            if (c.CustomFor != null && price > 0) return $"The {c.Name} was made for another customer.";
             s.Listings.RemoveAll(l => l.DesignId == designId && l.Bin == bin);
             if (price > 0) s.Listings.Add(new Listing { DesignId = designId, Bin = bin, Price = price });
             return null;
@@ -182,8 +211,7 @@ namespace SiliconeTycoon.Sim
                 {
                     var c = s.Design(l.DesignId);
                     if (c == null || c.Stage != DesignStage.Released || l.Price <= 0) continue;
-                    double perf = Perf(c, l.Bin, seg.Metric);
-                    if (perf < need * OpenMarketMinShare || Power(c, l.Bin) > seg.MaxPowerW) continue;
+                    if (c.CustomFor != null || !Qualifies(d, seg, c, l.Bin, year)) continue;
                     if (Stock(s, l.DesignId, l.Bin) <= 0) continue;
                     offers.Add((Player, l, null, 0, l.Price));
                 }
@@ -201,11 +229,13 @@ namespace SiliconeTycoon.Sim
                 for (int i = 0; i < offers.Count; i++)
                 {
                     var o = offers[i];
-                    double perf = o.supplier == Player
-                        ? Perf(s.Design(o.listing.DesignId), o.listing.Bin, seg.Metric)
-                        : Perf(Rivals.OpenMarketOffer(d, s, o.rival, seg).Design, Rivals.BinOf(Rivals.OpenMarketOffer(d, s, o.rival, seg)), seg.Metric);
+                    ChipDesign chip;
+                    string bin;
+                    if (o.supplier == Player) { chip = s.Design(o.listing.DesignId); bin = o.listing.Bin; }
+                    else { var rp = Rivals.OpenMarketOffer(d, s, o.rival, seg); chip = rp.Design; bin = Rivals.BinOf(rp); }
+                    double perf = Perf(chip, bin, seg.Metric);
                     double rep = o.supplier == Player ? s.RepFactor : GameState.RepFactorOf(o.rival.Rep);
-                    offers[i] = (o.supplier, o.listing, o.rival, Attract(perf / need, expected / o.price, seg, rep), o.price);
+                    offers[i] = (o.supplier, o.listing, o.rival, Attract(perf / need, expected / o.price, seg, rep) * FeatureFactor(d, seg, chip, bin, year), o.price);
                 }
                 if (offers.Count == 0) continue;
 
@@ -265,16 +295,13 @@ namespace SiliconeTycoon.Sim
         /// <summary>Why a chip and price don't meet a request, or null if they do.</summary>
         public static string CheckBid(GameData d, Rfq r, ChipDesign c, string bin, double price)
         {
-            var seg = d.Segment(r.SegmentId);
             if (c?.Stats == null) return "Choose a chip that's in development or released.";
             if (!HasBin(c, bin)) return $"The {c.Name} has no {bin} bin.";
+            if (c.CustomFor != null) return $"The {c.Name} was made for another customer.";
             if (price <= 0) return "Enter a price.";
             if (price > r.MaxPrice) return $"The customer won't pay more than {Format.Money(r.MaxPrice)} a chip.";
-            double perf = Perf(c, bin, seg.Metric);
-            if (perf < r.MinMetric) return $"The customer needs {seg.Metric.ToString().ToLower()} of {r.MinMetric:0.00}; the {c.Name} {bin} manages {perf:0.00}.";
-            double watts = Power(c, bin);
-            if (watts > r.MaxPowerW) return $"The customer's design can shed {r.MaxPowerW:0.#} W; the {c.Name} {bin} draws {watts:0.00} W.";
-            return null;
+            var gaps = Specs.Check(d, ChipSpec.ForRfq(d, r), c, bin);
+            return gaps.Count > 0 ? "The customer " + gaps[0] + "." : null;
         }
 
         /// <param name="maxUnits">Most chips a month you'll supply; 0 offers the customer's whole volume. A partial bid
@@ -323,7 +350,8 @@ namespace SiliconeTycoon.Sim
             double risk = 1;
             if (b.BidderId == Player && c.Stage != DesignStage.Released)
                 risk = EstimatedReleaseMonth(d, s, c) > r.StartMonth ? LateRisk : DevelopmentRisk;
-            return BaseScore(seg, cust, CustomerOf(s, r.CustomerId), b.BidderId, perfRatio, r.ExpectedPrice / b.Price, RepFactor(s, b.BidderId)) * risk;
+            return BaseScore(seg, cust, CustomerOf(s, r.CustomerId), b.BidderId, perfRatio, r.ExpectedPrice / b.Price, RepFactor(s, b.BidderId)) * risk
+                   * FeatureFactor(d, seg, c, b.Bin, YearOfMonth(r.OpenMonth));
         }
 
         /// <summary>The score every bid has to beat: the rest of the industry offering a just-adequate chip.</summary>
@@ -358,10 +386,14 @@ namespace SiliconeTycoon.Sim
                     ExpectedPrice = expected,
                     MaxPrice = expected * MaxPriceFactor,
                     EstimatedUnits = seg.DemandAt(startYear) * cust.Share,
+                    MaxPins = cust.MaxPins,
+                    MinClockMHz = cust.MinClock == null ? 0 : Math.Round(Curves.At(cust.MinClock, s.YearF), 2),
+                    Features = seg.RequiredAt(s.YearF).Concat(cust.Needs.Where(x => s.YearF >= x.From).Select(x => x.Feature)).Distinct().ToList(),
                 };
                 s.Rfqs.Add(rfq);
                 cs.NextRfqMonth = int.MaxValue;
-                s.Log($"{cust.Name} asks for bids on a {seg.Name.ToLower()} chip: {seg.Metric.ToString().ToLower()} {rfq.MinMetric:0.00}+, under {rfq.MaxPowerW:0.#} W, " +
+                string extras = (rfq.MinClockMHz > 0 ? $", {rfq.MinClockMHz:0.##} MHz+" : "") + (rfq.Features.Count > 0 ? $", with {Features.List(rfq.Features)}" : "");
+                s.Log($"{cust.Name} asks for bids on a {seg.Name.ToLower()} chip: {seg.Metric.ToString().ToLower()} {rfq.MinMetric:0.00}+{extras}, under {rfq.MaxPowerW:0.#} W, " +
                       $"up to {Format.Money(rfq.MaxPrice)} each, about {rfq.EstimatedUnits:N0} a month. Bids close end of {Calendar.DateLabel(close * Calendar.WeeksPerMonth)}.", 0, NewsKinds.Rfq);
             }
         }
@@ -603,6 +635,8 @@ namespace SiliconeTycoon.Sim
                 double need = seg.NeedAt(year);
                 double fit = need > 0 ? Math.Min(1, Perf(c, it.Bin, seg.Metric) / need) : 0;
                 if (Power(c, it.Bin) > seg.MaxPowerW) fit *= 0.5;
+                fit *= FeatureFactor(d, seg, c, it.Bin, year);
+                if (!seg.RequiredAt(year).All(Features.OfBin(d, c, it.Bin).Contains)) fit *= 0.5;
                 double demand = Math.Max(1, seg.DemandAt(year));
                 double value = ExpectedPrice(seg, year) * fit / (1 + it.Units / demand);
                 best = Math.Max(best, value);
