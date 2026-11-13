@@ -223,7 +223,8 @@ namespace SiliconeTycoon.UI
             {
                 var best = Rivals.BestNode(D, r);
                 b.AddChild(Ui.Title(r.Name, 15));
-                b.AddChild(Ui.L($"{best?.Name ?? "—"} · makes {Ui.Units(r.Capacity)} chips a month ({r.LastUtilisation:P0} used) · {Format.Big(r.LastMonthRevenue)} revenue last month · reputation {r.Rep * 100:+0;-0;0}" +
+                string conv = r.ConvertingNodeId != null ? $" (converting to {D.Node(r.ConvertingNodeId).Name})" : "";
+                b.AddChild(Ui.L($"{best?.Name ?? "—"}{conv} · makes {Ui.Units(r.Capacity)} chips a month ({r.LastUtilisation:P0} used) · {Format.Big(r.LastMonthRevenue)} revenue last month · reputation {r.Rep * 100:+0;-0;0}" +
                                 (r.PriceWar ? " · PRICE WAR" : ""), 12, r.PriceWar ? Ui.Warn : Ui.Muted));
                 foreach (var p in r.Products)
                 {

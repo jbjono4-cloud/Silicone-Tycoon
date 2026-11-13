@@ -6,7 +6,7 @@ namespace SiliconeTycoon.Sim
     /// <summary>Saves are the whole <see cref="GameState"/> as JSON, versioned so old saves can be migrated.</summary>
     public static class SaveGame
     {
-        public const int Version = 2;
+        public const int Version = 3;
 
         public static string Serialize(GameState s) => JsonSerializer.Serialize(s, SimJson.Save);
 
@@ -33,6 +33,12 @@ namespace SiliconeTycoon.Sim
                     p.SlipRoll = slipped ? 0 : 1;
                     p.SlipSize = slipped && p.PlannedWeeks > 0 ? (p.ActualWeeks - p.PlannedWeeks) / (double)p.PlannedWeeks : 0;
                 }
+            }
+            if (s.SaveVersion < 3)
+            {
+                // rivals used to produce on every node they had researched
+                foreach (var r in s.Rivals)
+                    if (r.ProductionNodes.Count == 0) r.ProductionNodes = new System.Collections.Generic.List<string>(r.NodesReady);
             }
             s.SaveVersion = Version;
         }

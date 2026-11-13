@@ -125,9 +125,15 @@ namespace SiliconeTycoon.Sim
         public double TotalRevenue;
         public bool PriceWar;
         public int ProductsMade;
+        /// <summary>Nodes the rival has researched.</summary>
         public List<string> NodesReady = new List<string>();
+        /// <summary>Nodes the rival has a working fab for: it can only make chips on these.</summary>
+        public List<string> ProductionNodes = new List<string>();
         public string NextNodeId;
         public double NextNodeDue;
+        /// <summary>Node a fab is being converted to, and when production starts (fractional year).</summary>
+        public string ConvertingNodeId;
+        public double ConvertedYear;
         public List<RivalProduct> Products = new List<RivalProduct>();
         public RivalProject Project;
     }

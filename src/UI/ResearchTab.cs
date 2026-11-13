@@ -97,8 +97,10 @@ namespace SiliconeTycoon.UI
             foreach (var r in S.Rivals)
             {
                 var best = Rivals.BestNode(D, r);
-                string next = r.NextNodeId != null ? $" (next: {D.Node(r.NextNodeId).Name})" : "";
-                b.AddChild(Ui.Row(r.Name, (best?.Name ?? "—") + next));
+                string conv = r.ConvertingNodeId != null
+                    ? $", converting to {D.Node(r.ConvertingNodeId).Name} (about {Calendar.DateLabel((int)Math.Round((r.ConvertedYear - Calendar.StartYear) * Calendar.WeeksPerYear))})"
+                    : r.NextNodeId != null ? $", researching {D.Node(r.NextNodeId).Name}" : "";
+                b.AddChild(Ui.Row(r.Name, $"producing on {best?.Name ?? "—"}{conv}"));
             }
             b.AddChild(Ui.Wrap("Each programme has a hidden chance of slipping that depends on your average budget over the programme. You can change the budget at any time: more money works faster and lowers the risk, but a slip keeps costing money every week until the process works. A node you've researched still needs a fab before you can make chips on it.", 12, Ui.Muted));
             side.AddChild(card);

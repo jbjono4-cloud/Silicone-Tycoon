@@ -289,6 +289,27 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void RivalsMustConvertAFabBeforeMakingChipsOnANewNode()
+        {
+            var s = TestData.NewGame(seed: 2);
+            var m = Rivals.Get(s, "meridian");
+            for (int i = 0; i < 60 && m.ConvertingNodeId == null; i++) Simulation.AdvanceMonths(D, s, 1);
+            Assert.Equal("n8um", m.ConvertingNodeId);
+            Assert.Contains("n8um", m.NodesReady);
+            Assert.DoesNotContain("n8um", m.ProductionNodes);
+            Assert.True(m.ConvertedYear - s.YearF > 0.5);
+            Assert.Equal("n10um", Rivals.BestNode(D, m).Id);
+
+            double due = m.ConvertedYear;
+            while (s.YearF < due - 1.0 / 12) Simulation.AdvanceMonths(D, s, 1);
+            Assert.DoesNotContain(m.Products, p => p.Design.NodeId == "n8um");
+            Assert.True(m.Project == null || m.Project.Design.NodeId != "n8um");
+            Simulation.AdvanceMonths(D, s, 2);
+            Assert.Contains("n8um", m.ProductionNodes);
+            Assert.Contains(s.News, n => n.Text.Contains("is converting a fab"));
+        }
+
+        [Fact]
         public void CustomersRunBidsEveryCycle()
         {
             var s = TestData.NewGame();

@@ -29,8 +29,17 @@ namespace SiliconeTycoon.Sim
         public static RivalProduct Product(GameState s, string rivalId, string designId) =>
             Get(s, rivalId)?.Products.FirstOrDefault(p => p.Design.Id == designId);
 
+        /// <summary>The newest node the rival can make chips on (has a working fab for).</summary>
         public static ProcessNodeDef BestNode(GameData d, RivalState r) =>
+            d.Nodes.Where(n => r.ProductionNodes.Contains(n.Id)).OrderBy(n => n.FeatureNm).FirstOrDefault();
+
+        /// <summary>The newest node the rival has researched (it may still be converting a fab for it).</summary>
+        public static ProcessNodeDef ResearchedNode(GameData d, RivalState r) =>
             d.Nodes.Where(n => r.NodesReady.Contains(n.Id)).OrderBy(n => n.FeatureNm).FirstOrDefault();
+
+        /// <summary>Years from a rival having a node working to producing on it: a retool plus half a ramp, like the player's.</summary>
+        public static double ConversionYears(ProcessNodeDef n) =>
+            (Math.Ceiling(n.BuildMonths * FabOps.RetoolTimeShare) + n.RampMonths * 0.5) / 12.0;
 
         public static string BinOf(RivalProduct p) => Binning.BinsFor(p.Design)[0].Name;
 
@@ -56,6 +65,7 @@ namespace SiliconeTycoon.Sim
                     Capacity = Math.Max(MinCapacity, def.StartShare * def.Segments.Select(id => d.Segment(id)).Where(x => x != null).Sum(x => x.DemandAt(s.YearF))),
                     NodesReady = d.Nodes.Where(n => n.Requires == null || n.Year + def.NodeLagYears <= s.YearF).Select(n => n.Id).ToList(),
                 };
+                r.ProductionNodes = new List<string>(r.NodesReady);
                 s.Rivals.Add(r);
                 ScheduleNextNode(d, s, r, def);
             }
@@ -63,7 +73,7 @@ namespace SiliconeTycoon.Sim
 
         static void ScheduleNextNode(GameData d, GameState s, RivalState r, RivalDef def)
         {
-            var best = BestNode(d, r);
+            var best = ResearchedNode(d, r);
             var next = best == null ? null : d.Nodes.FirstOrDefault(n => n.Requires == best.Id);
             if (next == null)
             {
@@ -154,10 +164,21 @@ namespace SiliconeTycoon.Sim
                 }
 
                 // the node race
-                if (r.NextNodeId != null && s.YearF >= r.NextNodeDue)
+                // the node race: research, then convert a fab, then produce
+                if (r.ConvertingNodeId != null && s.YearF >= r.ConvertedYear)
                 {
-                    r.NodesReady.Add(r.NextNodeId);
-                    s.Log($"{r.Name} starts production on {d.Node(r.NextNodeId).Name}.", 0);
+                    r.ProductionNodes.Add(r.ConvertingNodeId);
+                    s.Log($"{r.Name} starts production on {d.Node(r.ConvertingNodeId).Name}.", 2);
+                    r.ConvertingNodeId = null;
+                }
+                if (r.NextNodeId != null && r.ConvertingNodeId == null && s.YearF >= r.NextNodeDue)
+                {
+                    var n = d.Node(r.NextNodeId);
+                    r.NodesReady.Add(n.Id);
+                    r.ConvertingNodeId = n.Id;
+                    r.ConvertedYear = s.YearF + ConversionYears(n);
+                    int tick = (int)Math.Round((r.ConvertedYear - Calendar.StartYear) * Calendar.WeeksPerYear);
+                    s.Log($"{r.Name} has its {n.Name} process working and is converting a fab: production expected around {Calendar.DateLabel(tick)}.", 2);
                     ScheduleNextNode(d, s, r, def);
                 }
 
