@@ -293,7 +293,7 @@ namespace SiliconeTycoon.Sim
                                     if (c.TargetClockMHz <= 0) continue;
                                     st = Analyze(d, s, c, ignoreNodeReady);
                                 }
-                                if (st.Valid && st.PowerW <= maxPowerW) return c;
+                                if (st.Valid && st.PowerW <= maxPowerW) { why = null; return c; }
                                 if (why == null && !st.Valid) why = st.Notes.FirstOrDefault(x => x.Severity >= 2)?.Text;
                             }
                     }
