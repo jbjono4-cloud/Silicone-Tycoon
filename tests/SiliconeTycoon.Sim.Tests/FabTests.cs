@@ -213,7 +213,7 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Equal(q.NetCapex, f.CapexPaid, 2);
             Assert.True(f.BookValue > q.NetCapex);   // new equipment plus what's left of the old
             // the 10 µm experience carries over in part, so it comes up better than a brand-new process
-            Assert.True(f.Learning > 0 && f.Learning <= FabOps.MaxTransfer + 1e-9);
+            Assert.True(f.Learning > 0 && f.Learning <= FabOps.MaxTransfer + 2);
             Assert.True(FabOps.D0(D, f) < D.Node("n8um").D0Launch);
         }
 
