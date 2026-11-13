@@ -23,6 +23,10 @@ namespace SiliconeTycoon.Sim
         public const string Validated = "validated";
         /// <summary>A process node became ready.</summary>
         public const string NodeReady = "node";
+        /// <summary>A world event happened.</summary>
+        public const string Event = "event";
+        /// <summary>An event needs the player's decision.</summary>
+        public const string Decision = "decision";
     }
 
     /// <summary>Everything that changes during a game. Saved and loaded whole as JSON.</summary>
@@ -61,6 +65,13 @@ namespace SiliconeTycoon.Sim
         public List<RivalState> Rivals = new List<RivalState>();
         public List<MarketRecord> MarketHistory = new List<MarketRecord>();
         public List<NewsItem> News = new List<NewsItem>();
+
+        /// <summary>How often random events happen (0 = never, 1 = normal). Scripted history happens whenever it's above 0.</summary>
+        public double EventRate = 1;
+        public List<ActiveEffect> Effects = new List<ActiveEffect>();
+        public List<Decision> Decisions = new List<Decision>();
+        /// <summary>Scripted events that have happened (or were history before the game began).</summary>
+        public List<string> FiredEvents = new List<string>();
 
         [JsonIgnore] public double Cash => Ledger.Cash;
         [JsonIgnore] public int Year => Calendar.YearOf(Tick);

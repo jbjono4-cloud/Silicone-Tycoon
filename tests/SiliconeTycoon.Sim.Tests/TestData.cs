@@ -12,6 +12,6 @@ namespace SiliconeTycoon.Sim.Tests
 
         /// <summary>A new 1970 game with plenty of cash so tests aren't cut short by bankruptcy.</summary>
         public static GameState NewGame(ulong seed = 1, double cash = 20_000_000, int year = 1970) =>
-            Simulation.NewGame(Load(), new NewGameOptions { Seed = seed, StartingCash = cash, StartYear = year });
+            Simulation.NewGame(Load(), new NewGameOptions { EventRate = 0, Seed = seed, StartingCash = cash, StartYear = year });
     }
 }

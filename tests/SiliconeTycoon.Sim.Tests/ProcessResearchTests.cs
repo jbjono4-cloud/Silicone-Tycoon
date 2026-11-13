@@ -19,7 +19,7 @@ namespace SiliconeTycoon.Sim.Tests
         [Fact]
         public void CannotJumpTooFarAheadOfHistory()
         {
-            var s = Simulation.NewGame(D, new NewGameOptions { NodesReady = new List<string> { "n10um", "n8um", "n6um" } });
+            var s = Simulation.NewGame(D, new NewGameOptions { EventRate = 0, NodesReady = new List<string> { "n10um", "n8um", "n6um" } });
             Assert.Contains("before 1973", ProcessResearch.CanStart(D, s, "n5um", 1.0));
         }
 

@@ -580,8 +580,9 @@ namespace SiliconeTycoon.Sim
             {
                 Month = month,
                 SegmentId = x.Id,
-                Demand = x.DemandAt(year),
-                OpenDemand = x.DemandAt(year) * x.OpenShare,
+                Demand = x.DemandAt(year) * Events.DemandFactor(s, x.Id),
+                OpenDemand = x.DemandAt(year) * x.OpenShare * Events.DemandFactor(s, x.Id),
+                Price = MarketPrice(s, x, year),
             });
 
             DeliverContracts(d, s, month, records);

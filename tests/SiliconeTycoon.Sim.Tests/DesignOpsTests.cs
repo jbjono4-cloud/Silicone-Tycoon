@@ -161,7 +161,7 @@ namespace SiliconeTycoon.Sim.Tests
         [Fact]
         public void ChipsMustMatchTheFabsNode()
         {
-            var s = Simulation.NewGame(D, new NewGameOptions { StartingCash = 20_000_000, NodesReady = new System.Collections.Generic.List<string> { "n10um", "n8um" } });
+            var s = Simulation.NewGame(D, new NewGameOptions { EventRate = 0, StartingCash = 20_000_000, NodesReady = new System.Collections.Generic.List<string> { "n10um", "n8um" } });
             Assert.Null(FabOps.Build(D, s, null, "n8um", "us_ca", 500));
             var c = Chip();
             DesignOps.StartDesign(D, s, c, s.DesignTeams[0].Id);

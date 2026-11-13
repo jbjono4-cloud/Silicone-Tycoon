@@ -10,6 +10,7 @@ namespace SiliconeTycoon.UI
     public partial class MarketTab : GameTab
     {
         string confirmSurplus;
+        readonly HashSet<string> hideChart = new HashSet<string>();
         VBoxContainer left, right;
 
         class BidDraft
@@ -70,6 +71,33 @@ namespace SiliconeTycoon.UI
                 b.AddChild(Ui.L($"{Ui.Units(seg.DemandAt(S.YearF))} chips a month ({seg.OpenShare:P0} through distributors) · going price {Format.Money(Market.ExpectedPrice(seg, S.YearF))} · " +
                                 $"competitive {seg.Metric.ToString().ToLower()} {seg.NeedAt(S.YearF):0.00} · under {seg.MaxPowerW:0.#} W", 13, Ui.Muted));
                 b.AddChild(Ui.L($"You sold {Ui.Units(rec?.PlayerUnits ?? 0)} last month ({share:P1} of the market){(rec != null && rec.PlayerRevenue > 0 ? $" for {Format.Big(rec.PlayerRevenue)}" : "")}", 13, share > 0 ? Ui.Ok : Ui.Muted));
+                foreach (var e in Events.Active(S, "demand").Where(e => e.Target == null || e.Target == seg.Id))
+                    b.AddChild(Ui.L($"{e.Text}: demand {e.Factor - 1:+0%;-0%} until {Calendar.DateLabel(e.EndMonth * Calendar.WeeksPerMonth)}", 12, e.Factor >= 1 ? Ui.Ok : Ui.Warn));
+                var hist = S.MarketHistory.Where(r => r.SegmentId == seg.Id).TakeLast(36).ToList();
+                if (hist.Count >= 3)
+                {
+                    bool open = !hideChart.Contains(seg.Id);
+                    string id = seg.Id;
+                    b.AddChild(Ui.Btn(open ? "Hide chart" : "Chart", () => { if (!hideChart.Remove(id)) hideChart.Add(id); Refresh(); }));
+                    if (open)
+                    {
+                        var labels = hist.Select(r => Calendar.DateLabel(r.Month * Calendar.WeeksPerMonth)).ToList();
+                        var units = new LineChart { ValueFormat = v => Ui.Units(v) };
+                        units.CustomMinimumSize = new Vector2(300, 170);
+                        units.SetData(labels,
+                            ("Market", Ui.Muted, hist.Select(r => r.Demand).ToList()),
+                            ("You", Ui.Accent, hist.Select(r => r.PlayerUnits).ToList()),
+                            ("Rivals", Ui.Rival1, hist.Select(r => r.RivalUnits).ToList()));
+                        b.AddChild(units);
+                        if (hist.Any(r => r.Price > 0))
+                        {
+                            var price = new LineChart { ValueFormat = v => Format.Money(v) };
+                            price.CustomMinimumSize = new Vector2(300, 120);
+                            price.SetData(labels, ("Price buyers paid", Ui.Ok, hist.Select(r => r.Price).ToList()));
+                            b.AddChild(price);
+                        }
+                    }
+                }
             }
             return card;
         }

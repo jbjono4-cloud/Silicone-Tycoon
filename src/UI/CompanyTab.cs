@@ -9,7 +9,8 @@ namespace SiliconeTycoon.UI
     /// <summary>The company at a glance: last month's books, the bank, history charts, auto-pause settings and news.</summary>
     public partial class CompanyTab : GameTab
     {
-        VBoxContainer alerts, books, bank, standing;
+        VBoxContainer alerts, books, bank, standing, decisions, world;
+        PanelContainer decisionCard;
         LineChart moneyChart, cashChart;
         RichTextLabel news;
 
@@ -23,10 +24,21 @@ namespace SiliconeTycoon.UI
             ls.SizeFlagsStretchRatio = 1.3f;
             AddChild(ls);
 
+            var (dc, db) = Ui.CardV("Decisions waiting");
+            decisionCard = dc;
+            decisions = Ui.V(8);
+            db.AddChild(decisions);
+            left.AddChild(dc);
+
             var (alertCard, ab) = Ui.CardV("Things to look at");
             alerts = Ui.V(6);
             ab.AddChild(alerts);
             left.AddChild(alertCard);
+
+            var (worldCard, wb) = Ui.CardV("The world right now");
+            world = Ui.V(4);
+            wb.AddChild(world);
+            left.AddChild(worldCard);
 
             var (booksCard, bb) = Ui.CardV("Last month");
             books = Ui.V(3);
@@ -60,6 +72,7 @@ namespace SiliconeTycoon.UI
             pb.AddChild(Check("a chip's silicon needs a decision", main.PauseOnChips, v => main.PauseOnChips = v));
             pb.AddChild(Check("a process node is ready", main.PauseOnNodes, v => main.PauseOnNodes = v));
             pb.AddChild(Check("something goes badly wrong", main.PauseOnBadNews, v => main.PauseOnBadNews = v));
+            pb.AddChild(Check("an event needs a decision", main.PauseOnDecisions, v => main.PauseOnDecisions = v));
             left.AddChild(pauseCard);
 
             var (newsCard, nb) = Ui.CardV("News");
@@ -83,12 +96,58 @@ namespace SiliconeTycoon.UI
         public override void Refresh()
         {
             if (S == null || books == null) return;
+            RefreshDecisions();
+            RefreshWorld();
             RefreshAlerts();
             RefreshBooks();
             RefreshBank();
             RefreshStanding();
             RefreshCharts();
             RefreshNews();
+        }
+
+        void RefreshDecisions()
+        {
+            Ui.Clear(decisions);
+            decisionCard.Visible = S.Decisions.Count > 0;
+            foreach (var x in S.Decisions.OrderBy(x => x.DeadlineTick))
+            {
+                decisions.AddChild(Ui.Title(x.Title, 15));
+                decisions.AddChild(Ui.Wrap(x.Text, 13, Ui.Fg));
+                for (int i = 0; i < x.Options.Count; i++)
+                {
+                    int pick = i;
+                    var row = Ui.H(8);
+                    row.AddChild(Ui.Btn(x.Options[i].Label, () => Act(Events.Choose(D, S, x.Id, pick))));
+                    row.AddChild(Ui.Wrap(x.Options[i].Detail + (i == x.Default ? " (happens if you don't decide)" : ""), 12, Ui.Muted));
+                    decisions.AddChild(row);
+                }
+                decisions.AddChild(Ui.L($"Decide by {Calendar.WeekLabel(x.DeadlineTick)}.", 12, Ui.Warn));
+            }
+        }
+
+        void RefreshWorld()
+        {
+            Ui.Clear(world);
+            var effects = S.Effects.Where(e => e.EndMonth >= S.MonthIndex).ToList();
+            foreach (var e in effects)
+            {
+                string until = Calendar.DateLabel(e.EndMonth * Calendar.WeeksPerMonth);
+                string what = e.Kind switch
+                {
+                    "demand" => $"demand for {(e.Target == null ? "all chips" : D.Segment(e.Target)?.Name.ToLower())} {e.Factor - 1:+0%;-0%}",
+                    "materials" => $"wafer materials {e.Factor - 1:+0%;-0%}",
+                    "grant" => $"extra {e.Factor:P0} subsidy for new fabs in {D.Location(e.Target)?.Name}",
+                    _ => e.Kind,
+                };
+                world.AddChild(Ui.L($"{e.Text}: {what} until {until}", 13, e.Kind == "grant" || e.Factor >= 1 && e.Kind == "demand" ? Ui.Ok : Ui.Warn));
+            }
+            foreach (var f in S.Fabs.Where(f => f.OutageWeeks > 0))
+                world.AddChild(Ui.L($"{f.Name}: {(f.OutageFactor <= 0 ? "down" : $"at {f.OutageFactor:P0}")} for {f.OutageReason}, about {f.OutageWeeks} weeks to go", 13, Ui.Bad));
+            foreach (var r in S.Rivals.Where(r => r.PriceWar))
+                world.AddChild(Ui.L($"{r.Name} is in a price war", 13, Ui.Warn));
+            if (world.GetChildCount() == 0) world.AddChild(Ui.L("Business as usual.", 13, Ui.Muted));
+            if (S.EventRate <= 0) world.AddChild(Ui.L("Events are switched off in this game.", 12, Ui.Muted));
         }
 
         void RefreshAlerts()

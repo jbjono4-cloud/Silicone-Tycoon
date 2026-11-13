@@ -161,7 +161,7 @@ namespace SiliconeTycoon.Sim.Tests
         public void DesignHouseStepsDownToAChipThatFits()
         {
             // 1980 home computer on 5 µm: the 16-bit core with the biggest RAM is too big for any package, so it must step down
-            var s = Simulation.NewGame(D, new NewGameOptions { StartYear = 1980 });
+            var s = Simulation.NewGame(D, new NewGameOptions { EventRate = 0, StartYear = 1980 });
             var seg = D.Segment("home");
             var c = DesignLab.PlanForSegment(D, s, "n5um", seg.Metric, "H-1", out string why, maxPowerW: seg.MaxPowerW);
             Assert.NotNull(c);
@@ -177,7 +177,7 @@ namespace SiliconeTycoon.Sim.Tests
         [InlineData(1985)]
         public void EveryMarketHasAChipOnEveryCurrentNode(int year)
         {
-            var s = Simulation.NewGame(D, new NewGameOptions { StartYear = year });
+            var s = Simulation.NewGame(D, new NewGameOptions { EventRate = 0, StartYear = year });
             foreach (var seg in D.Segments.Where(x => x.From <= year))
                 foreach (var n in D.Nodes.Where(x => x.Year <= year && x.Year >= year - 8))
                     Assert.True(DesignLab.PlanForSegment(D, s, n.Id, seg.Metric, "X", out string why, ignoreNodeReady: true, maxPowerW: seg.MaxPowerW) != null,

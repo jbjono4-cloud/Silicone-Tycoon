@@ -27,6 +27,7 @@ namespace SiliconeTycoon.UI
         readonly Dictionary<string, string> mapFor = new Dictionary<string, string>();
         readonly Dictionary<string, int> mapDraw = new Dictionary<string, int>();
         string confirmClose, renaming;
+        readonly HashSet<string> showHistory = new HashSet<string>();
 
         public FabsTab() { }
         public FabsTab(Main m) : base(m, "Fabs") { }
@@ -170,6 +171,14 @@ namespace SiliconeTycoon.UI
             };
             head.AddChild(Ui.L(stage, 14, f.Stage == FabStage.Running ? Ui.Ok : Ui.Warn));
             b.AddChild(head);
+            if (f.OutageWeeks > 0)
+                b.AddChild(Ui.L(f.OutageFactor <= 0
+                    ? $"Down for {f.OutageReason}: about {f.OutageWeeks} week{(f.OutageWeeks == 1 ? "" : "s")} until wafers start again."
+                    : $"Running at {f.OutageFactor:P0} because of {f.OutageReason}: about {f.OutageWeeks} week{(f.OutageWeeks == 1 ? "" : "s")} to go.", 13, Ui.Bad));
+            if (f.D0PenaltyWeeks > 0 && f.D0Penalty > 1)
+                b.AddChild(Ui.L($"Contaminated: defect density {f.D0Penalty:0.#}× normal for about {f.D0PenaltyWeeks} more weeks.", 13, Ui.Warn));
+            var pending = S.Decisions.FirstOrDefault(x => x.TargetId == f.Id);
+            if (pending != null) b.AddChild(DecisionRow(pending));
 
             if (f.Stage == FabStage.Construction)
             {
@@ -217,10 +226,54 @@ namespace SiliconeTycoon.UI
                 }
             }
 
+            if (f.History.Count >= 2)
+            {
+                bool open = showHistory.Contains(f.Id);
+                b.AddChild(Ui.Btn(open ? "Hide history" : "History", () => { if (!showHistory.Remove(f.Id)) showHistory.Add(f.Id); Refresh(); }, "Defect density, output and utilisation month by month"));
+                if (open) b.AddChild(HistoryBox(f));
+            }
             b.AddChild(ExpandRow(f));
             b.AddChild(RetoolRow(f));
             b.AddChild(CloseRow(f));
             return card;
+        }
+
+        Control DecisionRow(Decision x)
+        {
+            var box = Ui.V(4);
+            box.AddChild(Ui.Wrap($"{x.Title}: decide by {Calendar.WeekLabel(x.DeadlineTick)} or \"{x.Options[x.Default].Label}\" happens.", 13, Ui.Warn));
+            var row = Ui.H(8);
+            for (int i = 0; i < x.Options.Count; i++)
+            {
+                int pick = i;
+                row.AddChild(Ui.Btn(x.Options[i].Label, () => Act(Events.Choose(D, S, x.Id, pick)), x.Options[i].Detail));
+            }
+            box.AddChild(row);
+            return box;
+        }
+
+        Control HistoryBox(Fab f)
+        {
+            var box = Ui.V(6);
+            var h = f.History.TakeLast(60).ToList();
+            var labels = h.Select(x => Calendar.DateLabel(x.Month * Calendar.WeeksPerMonth)).ToList();
+            var n = D.Node(f.NodeId);
+            var d0 = new LineChart { ValueFormat = v => v.ToString("0.0") };
+            d0.CustomMinimumSize = new Vector2(300, 160);
+            d0.SetData(labels, ("Defects per cm²", Ui.Warn, h.Select(x => x.D0).ToList()), ($"{n.Name} floor", Ui.Muted, h.Select(_ => n.D0Mature).ToList()));
+            box.AddChild(Ui.Heading("Defect density"));
+            box.AddChild(d0);
+            var output = new LineChart { ValueFormat = v => Ui.Units(v) };
+            output.CustomMinimumSize = new Vector2(300, 160);
+            output.SetData(labels, ("Good dies", Ui.Ok, h.Select(x => x.Good).ToList()));
+            box.AddChild(Ui.Heading("Good dies a month"));
+            box.AddChild(output);
+            var util = new LineChart { ValueFormat = v => $"{v:0}%" };
+            util.CustomMinimumSize = new Vector2(300, 140);
+            util.SetData(labels, ("Wafer starts as % of capacity", Ui.Accent, h.Select(x => x.Utilisation * 100).ToList()));
+            box.AddChild(Ui.Heading("Utilisation"));
+            box.AddChild(util);
+            return box;
         }
 
         Control WaferMapBox(Fab f, ProcessNodeDef n, double d0, string key)

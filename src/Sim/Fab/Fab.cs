@@ -32,6 +32,17 @@ namespace SiliconeTycoon.Sim
     }
 
     /// <summary>Wafer starts a month a fab gives one product. DesignId null = test wafers (learning only).</summary>
+    /// <summary>One month of a fab's record, for its charts.</summary>
+    public class FabMonth
+    {
+        public int Month;
+        public int Starts;
+        /// <summary>Starts as a share of the fab's full capacity.</summary>
+        public double Utilisation;
+        public double D0;
+        public double Good;
+    }
+
     public class FabAllocation
     {
         public string DesignId;
@@ -105,6 +116,17 @@ namespace SiliconeTycoon.Sim
 
         public List<WaferLot> Lots = new List<WaferLot>();
 
+        /// <summary>Weeks left of a disruption (earthquake, fire, strike...) and the share of capacity it leaves.</summary>
+        public int OutageWeeks;
+        public double OutageFactor = 1;
+        public string OutageReason;
+        /// <summary>Weeks left of raised defect density (contamination) and its multiplier.</summary>
+        public int D0PenaltyWeeks;
+        public double D0Penalty = 1;
+        /// <summary>Good dies from lots that finished this month (all products and test wafers).</summary>
+        public double GoodThisMonth;
+        public List<FabMonth> History = new List<FabMonth>();
+
         [JsonIgnore] public bool Producing => Stage == FabStage.Ramping || Stage == FabStage.Running;
         [JsonIgnore] public bool Expanding => ExpandCapacity > 0;
     }
@@ -151,6 +173,7 @@ namespace SiliconeTycoon.Sim
         public const int MaxCapacity = 200000;
         /// <summary>How many dies of a lot are simulated individually; the result is scaled to the lot.</summary>
         public const int SampleDies = 1000;
+        public const int HistoryMonths = 120;
         /// <summary>Finished lots older than this are dropped from the fab's list.</summary>
         public const int KeepLotsWeeks = Calendar.WeeksPerYear * 2;
 
@@ -168,10 +191,10 @@ namespace SiliconeTycoon.Sim
             double infl = s.Inflation;
             double capexReal = n.FabCostPer1000 * Math.Pow(Math.Max(capacity, 1) / 1000.0, 0.85) * (0.85 + 0.15 * l.LabourIndex);
             q.Capex = capexReal * infl;
-            q.Subsidy = q.Capex * l.Subsidy;
+            q.Subsidy = q.Capex * Math.Min(0.6, l.Subsidy + Events.ExtraSubsidy(s, l.Id));
             q.NetCapex = q.Capex - q.Subsidy;
             q.MonthlyRunning = capexReal * infl * RunningShare * RunningFactor(l);
-            q.WaferCost = n.WaferCost * infl * WaferFactor(l);
+            q.WaferCost = n.WaferCost * infl * WaferFactor(l) * Events.MaterialsFactor(s);
             q.RecommendedEngineering = capexReal * infl * 0.004;
             q.BuildMonths = n.BuildMonths;
             q.RampMonths = n.RampMonths;
@@ -226,19 +249,20 @@ namespace SiliconeTycoon.Sim
         }
 
         public static double RunningCost(GameData d, GameState s, Fab f) => f.CapexReal * s.Inflation * RunningShare * RunningFactor(d.Location(f.LocationId));
-        public static double WaferCost(GameData d, GameState s, Fab f) => d.Node(f.NodeId).WaferCost * s.Inflation * WaferFactor(d.Location(f.LocationId));
+        public static double WaferCost(GameData d, GameState s, Fab f) => d.Node(f.NodeId).WaferCost * s.Inflation * WaferFactor(d.Location(f.LocationId)) * Events.MaterialsFactor(s);
         public static double RecommendedEngineering(GameState s, Fab f) => f.CapexReal * s.Inflation * 0.004;
 
-        public static double D0(GameData d, Fab f) => LearningCurve.D0(d.Node(f.NodeId), f.Learning);
+        public static double D0(GameData d, Fab f) => LearningCurve.D0(d.Node(f.NodeId), f.Learning) * (f.D0PenaltyWeeks > 0 ? Math.Max(1, f.D0Penalty) : 1);
 
         /// <summary>Wafer starts per month the fab can take right now: none while building, climbing through the ramp.</summary>
         public static int AvailableCapacity(GameData d, Fab f)
         {
-            if (f.Stage == FabStage.Running) return f.Capacity;
+            double outage = f.OutageWeeks > 0 ? Math.Clamp(f.OutageFactor, 0, 1) : 1;
+            if (f.Stage == FabStage.Running) return (int)Math.Floor(f.Capacity * outage);
             if (f.Stage != FabStage.Ramping) return 0;
             double rampWeeks = d.Node(f.NodeId).RampMonths * Calendar.WeeksPerMonth;
             double share = Math.Clamp(0.1 + 0.9 * f.RunningWeeks / rampWeeks, 0.1, 1.0);
-            return (int)Math.Floor(f.Capacity * share);
+            return (int)Math.Floor(f.Capacity * share * outage);
         }
 
         /// <summary>Die area wafers for a product are cut into. Test wafers use a nominal 10 mm² die.</summary>
@@ -512,6 +536,13 @@ namespace SiliconeTycoon.Sim
             if (!f.Producing) return;
 
             if (f.Expanding && --f.ExpandWeeksLeft <= 0) FinishExpansion(s, f);
+            if (f.D0PenaltyWeeks > 0 && --f.D0PenaltyWeeks == 0) s.Log($"{f.Name}'s yields are back to normal.", 1);
+            if (f.OutageWeeks > 0 && --f.OutageWeeks == 0)
+            {
+                s.Log($"{f.Name} is back to full production after {f.OutageReason ?? "the disruption"}.", 1);
+                f.OutageFactor = 1;
+                f.OutageReason = null;
+            }
             f.RunningWeeks++;
             double rate = LearningCurve.Rate(f.LastUtilisation, LearningCurve.EngineerFactor(f.EngineeringBudget, RecommendedEngineering(s, f)));
             f.Learning += rate / Calendar.WeeksPerMonth;
@@ -575,12 +606,14 @@ namespace SiliconeTycoon.Sim
                 {
                     lot.Bins = Binning.Lot(d, s.Rng, design, lot.D0, lot.GrossDies);
                     lot.GoodDies = Binning.Good(lot.Bins);
+                    f.GoodThisMonth += lot.GoodDies;
                 }
                 else
                 {
                     int sample = Math.Min(lot.GrossDies, SampleDies);
                     double y = YieldModel.SampleYield(s.Rng, sample, lot.D0, lot.DieAreaMm2);
                     lot.GoodDies = (int)Math.Round(lot.GrossDies * y);
+                    f.GoodThisMonth += lot.GoodDies;
                 }
                 lot.Done = true;
             }
@@ -640,7 +673,10 @@ namespace SiliconeTycoon.Sim
             int available = AvailableCapacity(d, f);
             f.LastUtilisation = available > 0 ? Math.Min(1.0, f.StartsThisMonth / (double)available) : 0;
             f.LastMonthStarts = f.StartsThisMonth;
+            f.History.Add(new FabMonth { Month = s.MonthIndex, Starts = f.StartsThisMonth, Utilisation = f.Capacity > 0 ? f.StartsThisMonth / (double)f.Capacity : 0, D0 = D0(d, f), Good = f.GoodThisMonth });
+            if (f.History.Count > HistoryMonths) f.History.RemoveRange(0, f.History.Count - HistoryMonths);
             f.StartsThisMonth = 0;
+            f.GoodThisMonth = 0;
         }
 
         /// <summary>Finished lots whose dies haven't been handed on yet.</summary>

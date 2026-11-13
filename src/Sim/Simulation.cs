@@ -15,6 +15,8 @@ namespace SiliconeTycoon.Sim
         public List<string> NodesReady;
         /// <summary>Engineers in the starting design team.</summary>
         public int StartingEngineers = 6;
+        /// <summary>How often random events happen: 0 none, 0.5 calm, 1 normal, 1.5 turbulent.</summary>
+        public double EventRate = 1;
     }
 
     /// <summary>The weekly simulation loop.</summary>
@@ -32,6 +34,7 @@ namespace SiliconeTycoon.Sim
                 Tick = Calendar.TickOf(o.StartYear),
                 Seed = o.Seed,
                 Rng = new Rng(o.Seed),
+                EventRate = o.EventRate,
             };
             s.StartTick = s.Tick;
             s.Ledger.Cash = o.StartingCash * s.Inflation;
@@ -40,6 +43,7 @@ namespace SiliconeTycoon.Sim
                 : d.Nodes.Where(n => n.Year <= o.StartYear).Select(n => n.Id).ToList();
             DesignOps.AddTeam(s, "Design team", o.StartingEngineers);
             Market.Init(d, s);
+            Events.Init(d, s);
             s.Log($"{s.CompanyName} opens its doors with {Format.Big(s.Cash)} in the bank.", 1);
             return s;
         }
@@ -48,6 +52,7 @@ namespace SiliconeTycoon.Sim
         public static void Advance(GameData d, GameState s)
         {
             if (s.GameOver) return;
+            Events.WeekTick(d, s);
             ProcessResearch.WeekTick(d, s);
             DesignOps.WeekTick(d, s);
             foreach (var f in s.Fabs) FabOps.WeekTick(d, s, f);
@@ -65,6 +70,7 @@ namespace SiliconeTycoon.Sim
 
         static void MonthEnd(GameData d, GameState s)
         {
+            Events.MonthEnd(d, s);
             foreach (var f in s.Fabs) FabOps.MonthEnd(d, s, f);
             Market.MonthEnd(d, s);
             DesignOps.MonthEnd(s);

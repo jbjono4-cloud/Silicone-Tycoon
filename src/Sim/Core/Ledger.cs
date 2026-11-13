@@ -24,6 +24,8 @@ namespace SiliconeTycoon.Sim
         public const string Retooling = "Retooling write-offs";
         public const string BrokerSales = "Surplus sold to brokers";
         public const string Warehousing = "Warehousing";
+        public const string FabDamage = "Disaster repairs";
+        public const string Recalls = "Recalls";
     }
 
     public class Loan

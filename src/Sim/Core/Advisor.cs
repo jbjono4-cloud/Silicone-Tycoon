@@ -118,6 +118,10 @@ namespace SiliconeTycoon.Sim
                     Add(0, "Fabs", $"{f.Name} ran at {f.LastUtilisation:P0} last month. An idle fab still costs its running costs and depreciation.");
             }
 
+            // ---- events
+            foreach (var x in s.Decisions)
+                Add(3, "Company", $"{x.Title}: decide by {Calendar.WeekLabel(x.DeadlineTick)} or \"{x.Options[x.Default].Label}\" happens.");
+
             // ---- customers
             int unbid = s.Rfqs.Count(r => !r.Bids.Any(b => b.BidderId == Market.Player));
             if (unbid > 0) Add(0, "Market", $"{unbid} customer{(unbid == 1 ? " is" : "s are")} asking for bids you haven't answered.");

@@ -161,7 +161,7 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         static GameState WithNodes(params string[] nodes) =>
-            Simulation.NewGame(D, new NewGameOptions { StartingCash = 50_000_000, NodesReady = new System.Collections.Generic.List<string>(nodes) });
+            Simulation.NewGame(D, new NewGameOptions { EventRate = 0, StartingCash = 50_000_000, NodesReady = new System.Collections.Generic.List<string>(nodes) });
 
         [Fact]
         public void RetoolingCostsLessAndTakesLessTimeThanANewFab()

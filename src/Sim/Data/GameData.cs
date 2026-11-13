@@ -147,6 +147,7 @@ namespace SiliconeTycoon.Sim
         public List<SegmentDef> Segments = new List<SegmentDef>();
         public List<CustomerDef> Customers = new List<CustomerDef>();
         public List<RivalDef> Rivals = new List<RivalDef>();
+        public List<EventDef> Events = new List<EventDef>();
 
         public ProcessNodeDef Node(string id) => Nodes.FirstOrDefault(n => n.Id == id);
         public LocationDef Location(string id) => Locations.FirstOrDefault(l => l.Id == id);
@@ -157,7 +158,7 @@ namespace SiliconeTycoon.Sim
         public RivalDef Rival(string id) => Rivals.FirstOrDefault(x => x.Id == id);
 
         public static GameData FromJson(string nodesJson, string locationsJson, string blocksJson = null, string packagesJson = null,
-            string segmentsJson = null, string customersJson = null, string rivalsJson = null)
+            string segmentsJson = null, string customersJson = null, string rivalsJson = null, string eventsJson = null)
         {
             var d = new GameData
             {
@@ -168,6 +169,7 @@ namespace SiliconeTycoon.Sim
                 Segments = segmentsJson == null ? new List<SegmentDef>() : JsonSerializer.Deserialize<List<SegmentDef>>(segmentsJson, SimJson.Data),
                 Customers = customersJson == null ? new List<CustomerDef>() : JsonSerializer.Deserialize<List<CustomerDef>>(customersJson, SimJson.Data),
                 Rivals = rivalsJson == null ? new List<RivalDef>() : JsonSerializer.Deserialize<List<RivalDef>>(rivalsJson, SimJson.Data),
+                Events = eventsJson == null ? new List<EventDef>() : JsonSerializer.Deserialize<List<EventDef>>(eventsJson, SimJson.Data),
             };
             var problems = d.Validate();
             if (problems.Count > 0) throw new InvalidOperationException("Game data problems:\n" + string.Join("\n", problems));
@@ -179,7 +181,8 @@ namespace SiliconeTycoon.Sim
         {
             string Read(string name) => System.IO.File.ReadAllText(System.IO.Path.Combine(folder, name));
             return FromJson(Read("nodes.json"), Read("locations.json"), Read("blocks.json"), Read("packages.json"),
-                Read("segments.json"), Read("customers.json"), Read("rivals.json"));
+                Read("segments.json"), Read("customers.json"), Read("rivals.json"),
+                System.IO.File.Exists(System.IO.Path.Combine(folder, "events.json")) ? Read("events.json") : null);
         }
 
         public List<string> Validate()
@@ -241,6 +244,16 @@ namespace SiliconeTycoon.Sim
             foreach (var x in Rivals)
                 foreach (var id in x.Segments)
                     if (Segment(id) == null) p.Add($"{x.Id}: unknown segment {id}");
+            foreach (var g in Events.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate event id {g.Key}");
+            foreach (var e in Events)
+            {
+                if (string.IsNullOrWhiteSpace(e.Id) || string.IsNullOrWhiteSpace(e.Name)) p.Add("An event needs an Id and a Name");
+                if (!e.Scripted && e.Chance <= 0) p.Add($"{e.Id}: a random event needs a Chance");
+                if (e.Scripted && (e.Month < 1 || e.Month > 12)) p.Add($"{e.Id}: Month must be 1-12");
+                if (e.Factor <= 0) p.Add($"{e.Id}: Factor must be positive");
+                if (e.MaxWeeks < e.MinWeeks || e.MaxShare < e.MinShare) p.Add($"{e.Id}: Min values must not exceed Max values");
+                foreach (var id in e.Segments) if (Segment(id) == null) p.Add($"{e.Id}: unknown segment {id}");
+            }
             return p;
         }
     }

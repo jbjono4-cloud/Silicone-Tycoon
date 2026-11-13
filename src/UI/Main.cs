@@ -37,6 +37,9 @@ namespace SiliconeTycoon.UI
         public bool PauseOnChips = true;
         public bool PauseOnBadNews = true;
         public bool PauseOnNodes = true;
+        public bool PauseOnDecisions = true;
+        readonly HashSet<string> shownDecisions = new HashSet<string>();
+        PanelContainer decisionPopup;
 
         public override void _Ready()
         {
@@ -82,7 +85,8 @@ namespace SiliconeTycoon.UI
         static GameData LoadData() => GameData.FromJson(
             ReadText("res://data/nodes.json"), ReadText("res://data/locations.json"),
             ReadText("res://data/blocks.json"), ReadText("res://data/packages.json"),
-            ReadText("res://data/segments.json"), ReadText("res://data/customers.json"), ReadText("res://data/rivals.json"));
+            ReadText("res://data/segments.json"), ReadText("res://data/customers.json"), ReadText("res://data/rivals.json"),
+            ReadText("res://data/events.json"));
 
         // ================= start menu =================
         void ShowStart()
@@ -126,11 +130,19 @@ namespace SiliconeTycoon.UI
             scaleRow.AddChild(Ui.L("Ctrl + / Ctrl − / Ctrl 0", 12, Ui.Muted));
             box.AddChild(scaleRow);
 
+            var rates = new[] { (name: "Off", rate: 0.0), (name: "Calm", rate: 0.5), (name: "Normal", rate: 1.0), (name: "Turbulent", rate: 1.6) };
+            int rateIdx = 2;
+            var eventRow = Ui.H(10);
+            eventRow.AddChild(Ui.L("World events", 13, Ui.Muted));
+            eventRow.AddChild(Ui.Options(rates.Select(r => r.name).ToArray(), rateIdx, i => rateIdx = i));
+            eventRow.AddChild(Ui.L("Earthquakes, fires, strikes, recessions, booms... (Off also skips history's oil shocks and recessions.)", 12, Ui.Muted));
+            box.AddChild(eventRow);
+
             var row = Ui.H(10);
             row.AddChild(Ui.Primary("Found the company", () =>
             {
                 ulong seed = ulong.TryParse(seedEdit.Text.Trim(), out var v) ? v : 1;
-                StartGame(Simulation.NewGame(D, new NewGameOptions { CompanyName = nameEdit.Text, Seed = seed }));
+                StartGame(Simulation.NewGame(D, new NewGameOptions { CompanyName = nameEdit.Text, Seed = seed, EventRate = rates[rateIdx].rate }));
             }));
             if (FileAccess.FileExists(SavePath)) row.AddChild(Ui.Btn("Continue saved game", () => LoadFromFile(SavePath)));
             if (FileAccess.FileExists(AutosavePath)) row.AddChild(Ui.Btn("Continue autosave", () => LoadFromFile(AutosavePath)));
@@ -144,6 +156,9 @@ namespace SiliconeTycoon.UI
         void StartGame(GameState s)
         {
             S = s;
+            shownDecisions.Clear();
+            foreach (var x in S.Decisions) shownDecisions.Add(x.Id);
+            CloseDecision();
             newsSeen = S.News.Count;
             lastRefreshMonth = -1;
             startScreen?.QueueFree();
@@ -273,6 +288,16 @@ namespace SiliconeTycoon.UI
                 SetSpeed(0);
                 Toast("Paused: " + pauseFor);
             }
+            var fresh = S.Decisions.FirstOrDefault(x => !shownDecisions.Contains(x.Id));
+            if (fresh != null)
+            {
+                foreach (var x in S.Decisions) shownDecisions.Add(x.Id);
+                if (PauseOnDecisions)
+                {
+                    SetSpeed(0);
+                    ShowDecision(fresh);
+                }
+            }
 
             if (!S.GameOver && Calendar.IsQuarterEnd(S.Tick - 1)) WriteSave(AutosavePath, quiet: true);
 
@@ -289,6 +314,49 @@ namespace SiliconeTycoon.UI
                 AddChild(d);
                 d.PopupCentered(new Vector2I(520, 200));
             }
+        }
+
+        /// <summary>A pop-up for an event that needs a decision: the options, or decide later on the Company tab.</summary>
+        void ShowDecision(Decision x)
+        {
+            decisionPopup?.QueueFree();
+            var panel = new PanelContainer { ZIndex = 20 };
+            var box = Ui.V(10);
+            box.CustomMinimumSize = new Vector2(560, 0);
+            panel.AddChild(box);
+            box.AddChild(Ui.L("DECISION", 12, Ui.Warn));
+            box.AddChild(Ui.Title(x.Title, 20));
+            box.AddChild(Ui.Wrap(x.Text, 15));
+            for (int i = 0; i < x.Options.Count; i++)
+            {
+                int pick = i;
+                var row = Ui.H(10);
+                var btn = Ui.Primary(x.Options[i].Label, () =>
+                {
+                    string err = Events.Choose(D, S, x.Id, pick);
+                    if (err != null) { Toast(err); return; }
+                    CloseDecision();
+                    RefreshAll();
+                });
+                btn.CustomMinimumSize = new Vector2(190, 0);
+                row.AddChild(btn);
+                row.AddChild(Ui.Wrap(x.Options[i].Detail, 13, Ui.Muted));
+                box.AddChild(row);
+            }
+            var later = Ui.H(10);
+            later.AddChild(Ui.Btn("Decide later", () => { CloseDecision(); ShowTab("Company"); RefreshAll(); }));
+            later.AddChild(Ui.L($"By {Calendar.WeekLabel(x.DeadlineTick)}, or \"{x.Options[x.Default].Label}\" happens.", 12, Ui.Muted));
+            box.AddChild(later);
+            decisionPopup = panel;
+            AddChild(panel);
+            panel.ResetSize();
+            panel.Position = new Vector2((Size.X - panel.Size.X) / 2, Math.Max(40, (Size.Y - panel.Size.Y) / 3));
+        }
+
+        void CloseDecision()
+        {
+            decisionPopup?.QueueFree();
+            decisionPopup = null;
         }
 
         void RefreshTop()
@@ -410,6 +478,7 @@ namespace SiliconeTycoon.UI
             PauseOnChips = cf.GetValue("pause", "chips", true).AsBool();
             PauseOnBadNews = cf.GetValue("pause", "bad", true).AsBool();
             PauseOnNodes = cf.GetValue("pause", "nodes", true).AsBool();
+            PauseOnDecisions = cf.GetValue("pause", "decisions", true).AsBool();
         }
 
         public void SaveSettings()
@@ -421,6 +490,7 @@ namespace SiliconeTycoon.UI
             cf.SetValue("pause", "chips", PauseOnChips);
             cf.SetValue("pause", "bad", PauseOnBadNews);
             cf.SetValue("pause", "nodes", PauseOnNodes);
+            cf.SetValue("pause", "decisions", PauseOnDecisions);
             cf.Save(SettingsPath);
         }
 
