@@ -1,0 +1,7 @@
+[
+  { "Id": "meridian_ws", "Name": "Meridian Integrated wafer services", "RivalId": "meridian", "LocationId": "us_ca", "From": 1970, "NodeLagYears": 0.5, "Margin": 0.5, "Capacity": 500, "Growth": 0.08, "MaturityMonths": 12 },
+  { "Id": "kestrel_ws", "Name": "Kestrel Devices wafer services", "RivalId": "kestrel", "LocationId": "jp", "From": 1974, "NodeLagYears": 1.5, "Margin": 0.4, "Capacity": 400, "Growth": 0.08, "MaturityMonths": 10 },
+  { "Id": "orchard", "Name": "Orchard Wafer Services", "LocationId": "us_or", "From": 1978, "NodeLagYears": 2.0, "Margin": 0.3, "Capacity": 1200, "Growth": 0.25, "MaturityMonths": 18 },
+  { "Id": "sendai", "Name": "Sendai Silicon Works", "LocationId": "jp", "From": 1981, "NodeLagYears": 1.5, "Margin": 0.3, "Capacity": 2000, "Growth": 0.25, "MaturityMonths": 15 },
+  { "Id": "formosa", "Name": "Formosa Semiconductor Manufacturing", "LocationId": "tw", "From": 1985, "NodeLagYears": 1.0, "Margin": 0.25, "Capacity": 4000, "Growth": 0.35, "MaturityMonths": 18, "PurePlay": true }
+]

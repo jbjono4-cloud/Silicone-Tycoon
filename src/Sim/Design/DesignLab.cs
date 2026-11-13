@@ -198,7 +198,7 @@ namespace SiliconeTycoon.Sim
             var n = d.Node(c.NodeId);
             var pkg = d.Package(c.PackageId);
             if (n == null) { st.Add(2, "Choose a process node."); return st; }
-            if (!ignoreNodeReady && !s.NodeReady(n.Id)) st.Add(2, $"The {n.Name} process isn't ready yet.");
+            if (!ignoreNodeReady && !Foundry.CanDesignFor(d, s, n.Id)) st.Add(2, $"The {n.Name} process isn't ready yet, and no foundry you can reach runs it.");
             if (pkg == null) st.Add(2, "Choose a package.");
             else if (s.Year < pkg.Year) st.Add(2, $"The {pkg.Name} isn't available until {pkg.Year}.");
             if (c.Blocks.Count == 0) { st.Add(2, "Place at least one block."); return st; }

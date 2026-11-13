@@ -26,6 +26,11 @@ namespace SiliconeTycoon.Sim
         public const string Warehousing = "Warehousing";
         public const string FabDamage = "Disaster repairs";
         public const string Recalls = "Recalls";
+        public const string FoundryWafers = "Wafers bought from foundries";
+        public const string UnusedWafers = "Unused foundry wafers";
+        public const string SupplyPenalty = "Supply agreement penalties";
+        public const string Nre = "Custom chip engineering fees";
+        public const string FabSale = "Gain or loss on fab sales";
     }
 
     public class Loan

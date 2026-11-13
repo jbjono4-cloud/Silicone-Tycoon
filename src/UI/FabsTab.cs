@@ -27,6 +27,8 @@ namespace SiliconeTycoon.UI
         readonly Dictionary<string, string> mapFor = new Dictionary<string, string>();
         readonly Dictionary<string, int> mapDraw = new Dictionary<string, int>();
         string confirmClose, renaming;
+        readonly HashSet<string> saleOpen = new HashSet<string>();
+        readonly Dictionary<string, int> leaseChoice = new Dictionary<string, int>();
         readonly HashSet<string> showHistory = new HashSet<string>();
 
         public FabsTab() { }
@@ -180,6 +182,13 @@ namespace SiliconeTycoon.UI
             var pending = S.Decisions.FirstOrDefault(x => x.TargetId == f.Id);
             if (pending != null) b.AddChild(DecisionRow(pending));
 
+            if (f.External) b.AddChild(SupplyBox(f));
+            if (f.Stage == FabStage.Construction && f.External)
+            {
+                b.AddChild(Ui.L($"The foundry is qualifying your design rules: first wafers in about {Math.Max(1, f.BuildWeeksLeft / Calendar.WeeksPerMonth)} month(s). Plan which chips go in now.", 13, Ui.Muted));
+                b.AddChild(ProductsBox(f, n, FabOps.D0(D, f)));
+                return card;
+            }
             if (f.Stage == FabStage.Construction)
             {
                 double done = 1 - f.BuildWeeksLeft / (double)Math.Max(1, f.BuildWeeksTotal);
@@ -208,6 +217,7 @@ namespace SiliconeTycoon.UI
             b.AddChild(grid);
             b.AddChild(ProductsBox(f, n, d0));
             var eng = Ui.H(10);
+            if (f.External) eng.Visible = false;
             double rec = FabOps.RecommendedEngineering(S, f);
             eng.AddChild(Ui.L("Process engineering", 14, Ui.Muted));
             eng.AddChild(Ui.Spin(0, 200, 10, rec > 0 ? Math.Round(f.EngineeringBudget / rec * 100) : 100, v => FabOps.SetEngineering(f, rec * v / 100), "", "% of recommended"));
@@ -232,8 +242,10 @@ namespace SiliconeTycoon.UI
                 b.AddChild(Ui.Btn(open ? "Hide history" : "History", () => { if (!showHistory.Remove(f.Id)) showHistory.Add(f.Id); Refresh(); }, "Defect density, output and utilisation month by month"));
                 if (open) b.AddChild(HistoryBox(f));
             }
+            if (f.External) return card;
             b.AddChild(ExpandRow(f));
             b.AddChild(RetoolRow(f));
+            b.AddChild(SellRow(f));
             b.AddChild(CloseRow(f));
             return card;
         }
@@ -325,7 +337,20 @@ namespace SiliconeTycoon.UI
             grid.AddThemeConstantOverride("h_separation", 14);
             foreach (var h in new[] { "Chip", "Wafer starts", "Die", "Yield", "Good dies/mo", "Made / sold / stock", "", "" })
                 grid.AddChild(Ui.L(h, 12, Ui.Muted));
-            foreach (var a in f.Allocations.OrderBy(a => a.DesignId == null).ThenByDescending(a => a.Starts).ToList())
+            foreach (var a in f.Allocations.Where(a => a.ContractId != null).ToList())
+            {
+                var k = S.WaferContracts.FirstOrDefault(x => x.Id == a.ContractId);
+                double cy = YieldModel.Yield(d0, k?.DieMm2 ?? 10);
+                grid.AddChild(Ui.L($"Wafers for {D.Client(k?.ClientId)?.Name ?? "a client"}", 13, Ui.Accent));
+                grid.AddChild(Ui.L($"{a.Starts:N0} /mo (contract)", 13));
+                grid.AddChild(Ui.L($"{k?.DieMm2 ?? 10:0} mm² dies", 12, Ui.Muted));
+                grid.AddChild(Ui.L($"{cy:P0}", 13, k != null && d0 > k.MaxD0 ? Ui.Warn : null));
+                grid.AddChild(Ui.L(k == null ? "" : $"{Format.Money(k.Price)} a wafer", 13));
+                grid.AddChild(Ui.L(k != null && d0 > k.MaxD0 ? $"defects above the agreed {k.MaxD0:0.0}" : "—", 12, Ui.Muted));
+                grid.AddChild(Ui.L("", 12));
+                grid.AddChild(Ui.L("", 12));
+            }
+            foreach (var a in f.Allocations.Where(a => a.ContractId == null).OrderBy(a => a.DesignId == null).ThenByDescending(a => a.Starts).ToList())
             {
                 var chip = S.Design(a.DesignId);
                 string id = a.DesignId;
@@ -384,6 +409,64 @@ namespace SiliconeTycoon.UI
             else if (released.Count > 0 && free <= 0)
                 box.AddChild(Ui.L($"To add {released[0].Name}{(released.Count > 1 ? " or another chip" : "")}, free up wafer starts from a product above.", 12, Ui.Muted));
             box.AddChild(Ui.Wrap("Each product gets its own wafer starts. They share the fab's capacity, defect density and learning; a bigger die yields less per wafer.", 12, Ui.Muted));
+            return box;
+        }
+
+        Control SupplyBox(Fab f)
+        {
+            var box = Ui.V(4);
+            var fd = D.Foundry(f.FoundryId);
+            box.AddChild(Ui.L($"Supply agreement with {fd?.Name}: {f.Capacity:N0} wafers a month at {Format.Money(f.WaferPrice)} until {Calendar.DateLabel(f.SupplyEndMonth * Calendar.WeeksPerMonth)} · " +
+                              $"you pay for at least {f.MinTake:P0} of them (about {Format.Money(Math.Floor(f.Capacity * f.MinTake) * f.WaferPrice)} a month)", 13, Ui.Muted));
+            if (f.SupplyFactor < 0.99) box.AddChild(Ui.L($"The foundry is rationing: you get {f.SupplyFactor:P0} of your wafers while chips are short.", 13, Ui.Warn));
+            var row = Ui.H(8);
+            row.AddChild(Ui.L("Renew for", 13, Ui.Muted));
+            foreach (int months in new[] { 12, 24, 36 })
+            {
+                int m = months;
+                row.AddChild(Ui.Btn($"{m} months", () => Act(Foundry.RenewSupply(D, S, f, m)), "At the foundry's price today"));
+            }
+            row.AddChild(Ui.Spacer());
+            if (confirmClose == f.Id)
+            {
+                row.AddChild(Ui.Btn($"Confirm: pay {Format.Big(Foundry.CancelCost(S, f))}", () => { confirmClose = null; Act(Foundry.CancelSupply(D, S, f)); }));
+                row.AddChild(Ui.Btn("Keep it", () => { confirmClose = null; Refresh(); }));
+            }
+            else row.AddChild(Ui.Btn("End early", () => { confirmClose = f.Id; Refresh(); }, $"Costs {Format.Big(Foundry.CancelCost(S, f))}: {Foundry.CancelShare:P0} of the minimum payments left"));
+            box.AddChild(row);
+            return box;
+        }
+
+        Control SellRow(Fab f)
+        {
+            var box = Ui.V(4);
+            var q = Foundry.QuoteSale(D, S, f);
+            if (q.Problem != null)
+            {
+                if (q.Buyer == null && Foundry.OpenFoundries(D, S).Any()) box.AddChild(Ui.L(q.Problem, 12, Ui.Muted));
+                return box;
+            }
+            if (!saleOpen.Contains(f.Id))
+            {
+                var r = Ui.H(8);
+                r.AddChild(Ui.Btn("Sell to a foundry", () => { saleOpen.Add(f.Id); Refresh(); }));
+                r.AddChild(Ui.L($"{q.Buyer.Name} would pay about {Format.Big(q.Price)} (book value {Format.Big(q.BookValue)})", 12, Ui.Muted));
+                box.AddChild(r);
+                return box;
+            }
+            int keep = leaseChoice.TryGetValue(f.Id, out var k) ? k : 0;
+            box.AddChild(Ui.Heading("Sell the fab"));
+            box.AddChild(Ui.Wrap($"{q.Buyer.Name} offers {Format.Big(q.Price)} for {f.Name} ({(q.Price >= q.BookValue ? "a gain" : "a loss")} of {Format.Big(Math.Abs(q.Price - q.BookValue))} on its book value). " +
+                                 "You can keep buying part of its output: your chips stay on the same line and its learning, at the foundry's price.", 13));
+            var row = Ui.H(8);
+            row.AddChild(Ui.L("Keep", 13, Ui.Muted));
+            row.AddChild(Ui.Spin(0, f.Capacity, 50, keep, v => { leaseChoice[f.Id] = (int)v; Refresh(); }, "", " wafers a month"));
+            row.AddChild(Ui.L(keep > 0 ? $"at about {Format.Money(q.LeasePrice * 0.96)} a wafer for 24 months" : "(none: lots in the line go with the fab)", 12, Ui.Muted));
+            box.AddChild(row);
+            var go = Ui.H(8);
+            go.AddChild(Ui.Primary("Sell", () => { saleOpen.Remove(f.Id); Act(Foundry.SellFab(D, S, f, keep, 24)); }));
+            go.AddChild(Ui.Btn("Not now", () => { saleOpen.Remove(f.Id); Refresh(); }));
+            box.AddChild(go);
             return box;
         }
 

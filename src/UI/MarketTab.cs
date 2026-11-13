@@ -219,13 +219,13 @@ namespace SiliconeTycoon.UI
             if (mine.Count == 0) b.AddChild(Ui.L("None yet. Win a customer's bid to get one.", 13, Ui.Muted));
             foreach (var k in mine)
             {
-                var cust = D.Customer(k.CustomerId);
+                string buyer = Market.BuyerName(D, k.CustomerId) + (k.FixedMonthly > 0 ? " (custom chip)" : "");
                 var c = S.Design(k.DesignId);
                 int now = S.MonthIndex;
                 string when = now < k.StartMonth ? $"starts {Calendar.DateLabel(k.StartMonth * Calendar.WeeksPerMonth)}"
                     : k.Status == ContractStatus.Active ? $"{k.EndMonth - now + 1} months left" : k.Status.ToString().ToLower();
                 var col = k.Status == ContractStatus.Cancelled ? Ui.Bad : k.ShortMonths > 0 ? Ui.Warn : k.Status == ContractStatus.Active ? Ui.Fg : Ui.Muted;
-                b.AddChild(Ui.L($"{cust.Name}: {c?.Name} {k.Bin} at {Format.Money(Market.ContractPrice(k, Math.Max(now, k.StartMonth)))} · up to {Ui.Units(k.MaxMonthly)} a month · {when}", 14, col));
+                b.AddChild(Ui.L($"{buyer}: {c?.Name} {k.Bin} at {Format.Money(Market.ContractPrice(k, Math.Max(now, k.StartMonth)))} · up to {Ui.Units(k.MaxMonthly)} a month · {when}", 14, col));
                 if (k.Status == ContractStatus.Active && now > k.StartMonth)
                     b.AddChild(Ui.L($"   Last month: ordered {Ui.Units(k.LastMonthOrdered)}, delivered {Ui.Units(k.LastMonthDelivered)}{(k.ShortMonths > 0 ? $" · short {k.ShortMonths} month(s) running: three and they cancel" : "")}", 12, k.ShortMonths > 0 ? Ui.Warn : Ui.Muted));
             }
@@ -243,6 +243,12 @@ namespace SiliconeTycoon.UI
             foreach (var c in chips)
             {
                 b.AddChild(Ui.Title(c.Name, 15));
+                if (c.CustomFor != null)
+                {
+                    var deal = Foundry.Deal(S, c.CustomFor);
+                    b.AddChild(Ui.L($"Made for {(deal != null ? D.Client(deal.ClientId)?.Name : "a client")}: sold only to them. {Ui.Units(S.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.Units))} in stock.", 12, Ui.Muted));
+                    continue;
+                }
                 var fits = D.Segments.Where(seg => seg.Active(S.YearF) && Market.Qualifies(D, seg, c, Binning.BinsFor(c)[0].Name, S.YearF)).ToList();
                 b.AddChild(Ui.L(fits.Count == 0 ? "Distributors won't stock it: it's too far behind, too hot, or missing a feature buyers now insist on." : "Distributors stock it for: " + string.Join(", ", fits.Select(x => x.Name.ToLower())), 12, fits.Count == 0 ? Ui.Warn : Ui.Muted));
                 var missingWants = fits.SelectMany(seg => seg.WantsAt(S.YearF).Where(w => !Features.OfBin(D, c, Binning.BinsFor(c)[0].Name).Contains(w.Feature)).Select(w => (seg, w))).ToList();

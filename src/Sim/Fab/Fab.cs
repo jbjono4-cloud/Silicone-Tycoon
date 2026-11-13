@@ -10,6 +10,8 @@ namespace SiliconeTycoon.Sim
     /// <summary>A batch of wafers started together. Its yield is sampled when it finishes.</summary>
     public class WaferLot
     {
+        /// <summary>Wafers made for a foundry client's contract (no design of yours).</summary>
+        public string ContractId;
         public string Id;
         public string FabId;
         public string NodeId;
@@ -47,6 +49,8 @@ namespace SiliconeTycoon.Sim
     {
         public string DesignId;
         public int Starts;
+        /// <summary>Wafers for a foundry client's contract (DesignId is null then).</summary>
+        public string ContractId;
     }
 
     public class Fab
@@ -102,9 +106,13 @@ namespace SiliconeTycoon.Sim
 
         /// <summary>The main chip the fab makes (most wafer starts), or null if it only runs test wafers.</summary>
         [JsonIgnore]
-        public string DesignId => Allocations.Where(a => a.DesignId != null && a.Starts > 0).OrderByDescending(a => a.Starts).FirstOrDefault()?.DesignId;
+        public string DesignId => Allocations.Where(a => a.ContractId == null && a.DesignId != null && a.Starts > 0).OrderByDescending(a => a.Starts).FirstOrDefault()?.DesignId;
 
-        public int StartsFor(string designId) => Allocations.Where(a => a.DesignId == designId).Sum(a => a.Starts);
+        public int StartsFor(string designId) => Allocations.Where(a => a.ContractId == null && a.DesignId == designId).Sum(a => a.Starts);
+        /// <summary>Wafer starts a month reserved for foundry clients.</summary>
+        [JsonIgnore] public int ContractStarts => Allocations.Where(a => a.ContractId != null).Sum(a => a.Starts);
+        /// <summary>Share of an external supply the foundry actually delivers this month (it squeezes customers in shortages).</summary>
+        public double SupplyFactor = 1;
         public bool Makes(string designId) => StartsFor(designId) > 0;
 
         public int StartsThisMonth;
@@ -126,6 +134,18 @@ namespace SiliconeTycoon.Sim
         /// <summary>Good dies from lots that finished this month (all products and test wafers).</summary>
         public double GoodThisMonth;
         public List<FabMonth> History = new List<FabMonth>();
+
+        /// <summary>
+        /// A wafer supply agreement with a foundry rather than a fab you own: no capex, running costs or learning of your
+        /// own; you pay WaferPrice a wafer and at least MinTake of the reserved wafers each month until SupplyEndMonth.
+        /// </summary>
+        public bool External;
+        public string FoundryId;
+        public double WaferPrice;
+        public int SupplyEndMonth;
+        public double MinTake;
+        /// <summary>Sold to a foundry (shown as gone, like a closed fab).</summary>
+        public bool Sold;
 
         [JsonIgnore] public bool Producing => Stage == FabStage.Ramping || Stage == FabStage.Running;
         [JsonIgnore] public bool Expanding => ExpandCapacity > 0;
@@ -235,6 +255,36 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
+        /// <summary>A fab that is already running (for company starts): built some months ago, paid for, part-depreciated.</summary>
+        public static Fab Existing(GameData d, GameState s, string nodeId, string locationId, int capacity, double learningMonths, int ageMonths)
+        {
+            var q = Quote(d, s, nodeId, locationId, capacity);
+            var n = d.Node(nodeId);
+            var l = d.Location(locationId);
+            double book = q.NetCapex * Math.Max(0, 1 - ageMonths / (double)DepreciationMonths);
+            var f = new Fab
+            {
+                Id = s.NewId("fab"),
+                Name = DefaultName(l, n),
+                LocationId = locationId,
+                NodeId = nodeId,
+                Capacity = capacity,
+                Capex = q.NetCapex,
+                CapexReal = q.NetCapex / s.Inflation,
+                CapexPaid = q.NetCapex,
+                BookValue = book,
+                MonthlyDepreciation = q.NetCapex / DepreciationMonths,
+                Stage = FabStage.Running,
+                Learning = learningMonths,
+                EngineeringBudget = q.RecommendedEngineering,
+                OrderedTick = s.Tick,
+            };
+            f.Allocations.Add(new FabAllocation { DesignId = null, Starts = capacity / 4 });
+            s.Fabs.Add(f);
+            s.NodeExperience[nodeId] = Math.Max(FabOps.Experience(s, nodeId), learningMonths);
+            return f;
+        }
+
         /// <summary>The name a fab gets when the player doesn't choose one. Retooling renames fabs that still have it.</summary>
         public static string DefaultName(LocationDef l, ProcessNodeDef n) => $"{l.Name} {n.Name} fab";
 
@@ -248,8 +298,8 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
-        public static double RunningCost(GameData d, GameState s, Fab f) => f.CapexReal * s.Inflation * RunningShare * RunningFactor(d.Location(f.LocationId));
-        public static double WaferCost(GameData d, GameState s, Fab f) => d.Node(f.NodeId).WaferCost * s.Inflation * WaferFactor(d.Location(f.LocationId)) * Events.MaterialsFactor(s);
+        public static double RunningCost(GameData d, GameState s, Fab f) => f.External ? 0 : f.CapexReal * s.Inflation * RunningShare * RunningFactor(d.Location(f.LocationId));
+        public static double WaferCost(GameData d, GameState s, Fab f) => f.External ? f.WaferPrice : d.Node(f.NodeId).WaferCost * s.Inflation * WaferFactor(d.Location(f.LocationId)) * Events.MaterialsFactor(s);
         public static double RecommendedEngineering(GameState s, Fab f) => f.CapexReal * s.Inflation * 0.004;
 
         public static double D0(GameData d, Fab f) => LearningCurve.D0(d.Node(f.NodeId), f.Learning) * (f.D0PenaltyWeeks > 0 ? Math.Max(1, f.D0Penalty) : 1);
@@ -257,7 +307,7 @@ namespace SiliconeTycoon.Sim
         /// <summary>Wafer starts per month the fab can take right now: none while building, climbing through the ramp.</summary>
         public static int AvailableCapacity(GameData d, Fab f)
         {
-            double outage = f.OutageWeeks > 0 ? Math.Clamp(f.OutageFactor, 0, 1) : 1;
+            double outage = (f.OutageWeeks > 0 ? Math.Clamp(f.OutageFactor, 0, 1) : 1) * (f.External ? Math.Clamp(f.SupplyFactor, 0, 1) : 1);
             if (f.Stage == FabStage.Running) return (int)Math.Floor(f.Capacity * outage);
             if (f.Stage != FabStage.Ramping) return 0;
             double rampWeeks = d.Node(f.NodeId).RampMonths * Calendar.WeeksPerMonth;
@@ -288,10 +338,10 @@ namespace SiliconeTycoon.Sim
             if (starts < 0) return "Wafer starts can't be negative.";
             string err = CheckProduct(d, s, f, designId);
             if (err != null && starts > 0) return err;
-            int others = f.Allocations.Where(a => a.DesignId != designId).Sum(a => a.Starts);
-            if (others + starts > f.Capacity) return $"{f.Name} can start {f.Capacity:N0} wafers a month; the other products already take {others:N0}.";
+            int others = f.Allocations.Where(a => !(a.ContractId == null && a.DesignId == designId)).Sum(a => a.Starts);
+            if (others + starts > f.Capacity) return $"{f.Name} can start {f.Capacity:N0} wafers a month; the other products{(f.ContractStarts > 0 ? " and foundry clients" : "")} already take {others:N0}.";
             bool isNew = f.StartsFor(designId) == 0 && starts > 0;
-            f.Allocations.RemoveAll(a => a.DesignId == designId);
+            f.Allocations.RemoveAll(a => a.ContractId == null && a.DesignId == designId);
             if (starts > 0) f.Allocations.Add(new FabAllocation { DesignId = designId, Starts = starts });
             if (isNew && designId != null) s.Log($"{f.Name} starts making the {s.Design(designId).Name}.", 0);
             return null;
@@ -305,26 +355,29 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
+        /// <summary>Sets the total for your own products (foundry clients' wafers stay as contracted).</summary>
         internal static void SetTotalStarts(Fab f, int total)
         {
-            total = Math.Clamp(total, 0, Math.Max(0, f.Capacity));
-            int sum = f.Allocations.Sum(a => a.Starts);
-            if (f.Allocations.Count == 0)
+            int contracts = f.ContractStarts;
+            total = Math.Clamp(total - contracts, 0, Math.Max(0, f.Capacity - contracts));
+            var own = f.Allocations.Where(a => a.ContractId == null).ToList();
+            int sum = own.Sum(a => a.Starts);
+            if (own.Count == 0)
             {
                 if (total > 0) f.Allocations.Add(new FabAllocation { DesignId = null, Starts = total });
                 return;
             }
             if (sum <= 0)
             {
-                f.Allocations[0].Starts = total;
-                for (int i = 1; i < f.Allocations.Count; i++) f.Allocations[i].Starts = 0;
+                own[0].Starts = total;
+                for (int i = 1; i < own.Count; i++) own[i].Starts = 0;
                 return;
             }
             int assigned = 0;
-            for (int i = 0; i < f.Allocations.Count; i++)
+            for (int i = 0; i < own.Count; i++)
             {
-                var a = f.Allocations[i];
-                a.Starts = i == f.Allocations.Count - 1 ? total - assigned : (int)Math.Round(a.Starts * (double)total / sum);
+                var a = own[i];
+                a.Starts = i == own.Count - 1 ? total - assigned : (int)Math.Round(a.Starts * (double)total / sum);
                 a.Starts = Math.Max(0, a.Starts);
                 assigned += a.Starts;
             }
@@ -335,9 +388,9 @@ namespace SiliconeTycoon.Sim
         {
             string err = CheckProduct(d, s, f, designId);
             if (err != null) return err;
-            int total = f.PlannedStarts > 0 ? f.PlannedStarts : f.Capacity;
-            f.Allocations.Clear();
-            f.Allocations.Add(new FabAllocation { DesignId = designId, Starts = total });
+            int total = (f.PlannedStarts > 0 ? f.PlannedStarts : f.Capacity) - f.ContractStarts;
+            f.Allocations.RemoveAll(a => a.ContractId == null);
+            if (total > 0) f.Allocations.Add(new FabAllocation { DesignId = designId, Starts = total });
             if (designId != null) s.Log($"{f.Name} switches production to the {s.Design(designId).Name}.", 0);
             return null;
         }
@@ -345,6 +398,7 @@ namespace SiliconeTycoon.Sim
         /// <summary>What re-equipping a fab for a newer node would cost and how long it would be down.</summary>
         public static FabQuote RetoolQuote(GameData d, GameState s, Fab f, string nodeId)
         {
+            if (f.External) return new FabQuote { Problem = "That's a foundry's line: you can't retool it." };
             var n = d.Node(nodeId);
             var old = d.Node(f.NodeId);
             var fresh = Quote(d, s, nodeId, f.LocationId, f.Capacity);
@@ -420,6 +474,7 @@ namespace SiliconeTycoon.Sim
         /// </summary>
         public static FabQuote ExpandQuote(GameData d, GameState s, Fab f, int extra)
         {
+            if (f.External) return new FabQuote { Problem = "That's a foundry's line: renew or sign a bigger agreement instead." };
             var now = Quote(d, s, f.NodeId, f.LocationId, f.Capacity);
             var bigger = Quote(d, s, f.NodeId, f.LocationId, f.Capacity + extra);
             var n = d.Node(f.NodeId);
@@ -486,6 +541,7 @@ namespace SiliconeTycoon.Sim
         public static string Close(GameData d, GameState s, Fab f)
         {
             if (f.Stage == FabStage.Closed) return $"{f.Name} is already closed.";
+            if (f.External) return Foundry.CancelSupply(d, s, f);
             double value = (f.Stage == FabStage.Construction ? f.CapexPaid + f.BookValue : f.BookValue)   // a retooling fab still carries its old equipment
                            + f.ExpandPaid;                                                                  // and an unfinished expansion is lost too
             double salvage = value * SalvageShare;
@@ -516,6 +572,13 @@ namespace SiliconeTycoon.Sim
             {
                 f.BuildWeeksLeft--;
                 if (f.BuildWeeksLeft > 0) return;
+                if (f.External)
+                {
+                    f.Stage = FabStage.Running;
+                    f.RunningWeeks = 0;
+                    s.Log($"{f.Name}: your first wafers are going into the line.", 1);
+                    return;
+                }
                 double rest = f.Capex - f.CapexPaid;
                 if (rest > 0.005)
                 {
@@ -544,7 +607,8 @@ namespace SiliconeTycoon.Sim
                 f.OutageReason = null;
             }
             f.RunningWeeks++;
-            double rate = LearningCurve.Rate(f.LastUtilisation, LearningCurve.EngineerFactor(f.EngineeringBudget, RecommendedEngineering(s, f)));
+            // a foundry keeps learning on its own volume; your fabs learn from yours
+            double rate = f.External ? 1.0 : LearningCurve.Rate(f.LastUtilisation, LearningCurve.EngineerFactor(f.EngineeringBudget, RecommendedEngineering(s, f)));
             f.Learning += rate / Calendar.WeeksPerMonth;
             if (f.Stage == FabStage.Ramping && f.RunningWeeks >= n.RampMonths * Calendar.WeeksPerMonth)
             {
@@ -557,24 +621,31 @@ namespace SiliconeTycoon.Sim
         }
 
         /// <summary>Wafer starts a month each product actually gets: its plan, scaled down if the fab can't run them all (while ramping).</summary>
-        public static List<(string designId, int starts)> EffectiveStarts(GameData d, Fab f)
+        public static List<(string designId, int starts)> EffectiveStarts(GameData d, Fab f) =>
+            EffectiveAllocations(d, f).Where(x => x.a.ContractId == null).Select(x => (x.a.DesignId, x.starts)).ToList();
+
+        /// <summary>Every allocation (your products and foundry clients) with the starts it gets this month.</summary>
+        public static List<(FabAllocation a, int starts)> EffectiveAllocations(GameData d, Fab f)
         {
             int planned = f.PlannedStarts;
             int available = AvailableCapacity(d, f);
             double scale = planned > available && planned > 0 ? available / (double)planned : 1;
-            return f.Allocations.Where(a => a.Starts > 0).Select(a => (a.DesignId, (int)Math.Floor(a.Starts * scale))).ToList();
+            return f.Allocations.Where(a => a.Starts > 0).Select(a => (a, (int)Math.Floor(a.Starts * scale))).ToList();
         }
 
         static void StartWafers(GameData d, GameState s, Fab f, ProcessNodeDef n)
         {
             int week = Calendar.WeekInMonth(s.Tick);
-            foreach (var (designId, target) in EffectiveStarts(d, f))
+            foreach (var (alloc, target) in EffectiveAllocations(d, f))
             {
                 int wafers = target / Calendar.WeeksPerMonth + (week < target % Calendar.WeeksPerMonth ? 1 : 0);
                 if (wafers <= 0) continue;
+                var contract = alloc.ContractId == null ? null : s.WaferContracts.FirstOrDefault(k => k.Id == alloc.ContractId);
+                if (alloc.ContractId != null && contract == null) continue;
                 // a product no longer released (cancelled) runs as test wafers
-                string id = s.Design(designId)?.Stage == DesignStage.Released ? designId : null;
-                double die = DieArea(s, id);
+                string id = contract == null && s.Design(alloc.DesignId)?.Stage == DesignStage.Released ? alloc.DesignId : null;
+                double die = contract?.DieMm2 ?? DieArea(s, id);
+                if (contract != null) contract.StartedThisMonth += wafers;
                 int dpw = YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(die));
                 f.Lots.Add(new WaferLot
                 {
@@ -582,6 +653,7 @@ namespace SiliconeTycoon.Sim
                     FabId = f.Id,
                     NodeId = f.NodeId,
                     DesignId = id,
+                    ContractId = contract?.Id,
                     StartTick = s.Tick,
                     DoneTick = s.Tick + n.CycleWeeks,
                     Wafers = wafers,
@@ -592,7 +664,7 @@ namespace SiliconeTycoon.Sim
                 });
                 f.StartsThisMonth += wafers;
                 f.CumulativeWafers += wafers;
-                s.Ledger.Book(Accounts.Materials, -wafers * WaferCost(d, s, f));
+                s.Ledger.Book(f.External ? Accounts.FoundryWafers : Accounts.Materials, -wafers * WaferCost(d, s, f));
             }
         }
 
@@ -614,6 +686,7 @@ namespace SiliconeTycoon.Sim
                     double y = YieldModel.SampleYield(s.Rng, sample, lot.D0, lot.DieAreaMm2);
                     lot.GoodDies = (int)Math.Round(lot.GrossDies * y);
                     f.GoodThisMonth += lot.GoodDies;
+                    if (lot.ContractId != null) Foundry.LotFinished(s, lot, y);
                 }
                 lot.Done = true;
             }
@@ -638,6 +711,11 @@ namespace SiliconeTycoon.Sim
 
         public static void MonthEnd(GameData d, GameState s, Fab f)
         {
+            if (f.External)
+            {
+                ExternalMonthEnd(d, s, f);
+                return;
+            }
             if (f.Producing && f.Learning > Experience(s, f.NodeId)) s.NodeExperience[f.NodeId] = f.Learning;
             if (f.Stage == FabStage.Construction)
             {
@@ -671,6 +749,22 @@ namespace SiliconeTycoon.Sim
             }
 
             int available = AvailableCapacity(d, f);
+            f.LastUtilisation = available > 0 ? Math.Min(1.0, f.StartsThisMonth / (double)available) : 0;
+            f.LastMonthStarts = f.StartsThisMonth;
+            f.History.Add(new FabMonth { Month = s.MonthIndex, Starts = f.StartsThisMonth, Utilisation = f.Capacity > 0 ? f.StartsThisMonth / (double)f.Capacity : 0, D0 = D0(d, f), Good = f.GoodThisMonth });
+            if (f.History.Count > HistoryMonths) f.History.RemoveRange(0, f.History.Count - HistoryMonths);
+            f.StartsThisMonth = 0;
+            f.GoodThisMonth = 0;
+        }
+
+        /// <summary>A supply agreement's month: pay for reserved wafers you didn't use (take-or-pay) and keep the record.</summary>
+        static void ExternalMonthEnd(GameData d, GameState s, Fab f)
+        {
+            if (!f.Producing) return;
+            int available = AvailableCapacity(d, f);
+            double minimum = Math.Floor(f.Capacity * f.MinTake * Math.Clamp(f.SupplyFactor, 0, 1));
+            if (f.StartsThisMonth < minimum)
+                s.Ledger.Book(Accounts.UnusedWafers, -(minimum - f.StartsThisMonth) * f.WaferPrice);
             f.LastUtilisation = available > 0 ? Math.Min(1.0, f.StartsThisMonth / (double)available) : 0;
             f.LastMonthStarts = f.StartsThisMonth;
             f.History.Add(new FabMonth { Month = s.MonthIndex, Starts = f.StartsThisMonth, Utilisation = f.Capacity > 0 ? f.StartsThisMonth / (double)f.Capacity : 0, D0 = D0(d, f), Good = f.GoodThisMonth });

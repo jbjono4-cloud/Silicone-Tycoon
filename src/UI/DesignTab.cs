@@ -65,7 +65,7 @@ namespace SiliconeTycoon.UI
             segPick = Ui.Options(new string[0], 0, i => { formSeg = formSegs[i].Id; formRfq = null; RefreshBriefs(); if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
             b.AddChild(segPick);
             b.AddChild(Ui.Heading("Brief"));
-            briefPick = Ui.Options(new string[0], 0, i => { formRfq = i == 0 ? null : formRfqs[i - 1].Id; if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
+            briefPick = Ui.Options(new string[0], 0, i => { formRfq = i == 0 ? null : briefIds[i - 1]; if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
             briefPick.TooltipText = "Plan for the market as a whole, or to meet one customer's request (features, clock, pins)";
             b.AddChild(briefPick);
             b.AddChild(Ui.Heading("Process node"));
@@ -148,6 +148,8 @@ namespace SiliconeTycoon.UI
             head.AddChild(Ui.L(stage, 14, c.Stage == DesignStage.Validated ? Ui.Warn : c.Stage == DesignStage.Released ? Ui.Ok : Ui.Accent));
             b.AddChild(head);
             b.AddChild(StatsLine(c.Stats));
+            var forDeal = Foundry.Deal(S, c.CustomFor);
+            if (forDeal != null) b.AddChild(Ui.L($"Custom chip for {D.Client(forDeal.ClientId)?.Name}: only they can buy it.", 12, Ui.Accent));
             var chipFeatures = Features.Of(D, c);
             if (chipFeatures.Count > 0) b.AddChild(Ui.L("Features: " + Features.List(chipFeatures.OrderBy(x => x)), 12, Ui.Muted));
             var tools = Ui.H(8);
@@ -208,7 +210,7 @@ namespace SiliconeTycoon.UI
         void RefreshForm()
         {
             var segs = D.Segments.Where(x => x.Active(S.YearF)).ToList();
-            var nodes = D.Nodes.Where(n => S.NodeReady(n.Id)).OrderBy(n => n.FeatureNm).ToList();
+            var nodes = D.Nodes.Where(n => Foundry.CanDesignFor(D, S, n.Id)).OrderBy(n => n.FeatureNm).ToList();
             bool changed = !segs.Select(x => x.Id).SequenceEqual(formSegs.Select(x => x.Id)) || !nodes.Select(x => x.Id).SequenceEqual(formNodes.Select(x => x.Id));
             formSegs = segs;
             formNodes = nodes;
@@ -222,7 +224,7 @@ namespace SiliconeTycoon.UI
             if (changed)
             {
                 Fill(segPick, formSegs.Select(x => x.Name).ToArray(), formSegs.FindIndex(x => x.Id == formSeg));
-                Fill(nodePick, formNodes.Select(x => x.Name + (S.Fabs.Any(f => f.NodeId == x.Id && f.Stage != FabStage.Closed) ? "" : " (no fab)")).ToArray(), formNodes.FindIndex(x => x.Id == formNode));
+                Fill(nodePick, formNodes.Select(x => x.Name + (S.Fabs.Any(f => f.NodeId == x.Id && f.Stage != FabStage.Closed) ? "" : S.NodeReady(x.Id) ? " (no fab)" : " (at a foundry)")).ToArray(), formNodes.FindIndex(x => x.Id == formNode));
             }
             RefreshBriefs();
             if (string.IsNullOrWhiteSpace(nameEdit.Text)) nameEdit.Text = $"{S.CompanyName.Substring(0, Math.Min(2, S.CompanyName.Length)).ToUpperInvariant()}-{S.Designs.Count + 1}";
@@ -242,12 +244,17 @@ namespace SiliconeTycoon.UI
         string planWhy;
 
         Rfq BriefRfq => formRfq == null ? null : S.Rfqs.FirstOrDefault(r => r.Id == formRfq);
+        /// <summary>A custom chip deal picked as the brief (the chip is made for that client).</summary>
+        AsicDeal BriefDeal => formRfq == null ? null : S.AsicDeals.FirstOrDefault(x => x.Id == formRfq && x.Status == AsicStatus.Accepted);
+        List<string> briefIds = new List<string>();
 
         /// <summary>The brief the design house works to: the market as a whole, or one customer's request.</summary>
         ChipSpec Brief()
         {
             var seg = D.Segment(formSeg);
             if (seg == null) return null;
+            var deal = BriefDeal;
+            if (deal != null) return deal.Spec;
             var r = BriefRfq;
             return r != null ? ChipSpec.ForRfq(D, r) : ChipSpec.ForSegment(seg, S.YearF);
         }
@@ -255,11 +262,16 @@ namespace SiliconeTycoon.UI
         void RefreshBriefs()
         {
             var rfqs = S.Rfqs.Where(r => r.SegmentId == formSeg).OrderBy(r => r.CloseMonth).ToList();
-            if (formRfq != null && !rfqs.Any(r => r.Id == formRfq)) formRfq = null;
-            if (rfqs.Select(r => r.Id).SequenceEqual(formRfqs.Select(r => r.Id)) && briefPick.ItemCount == rfqs.Count + 1) return;
+            var deals = S.AsicDeals.Where(x => x.Status == AsicStatus.Accepted && x.SegmentId == formSeg && S.Design(x.DesignId) == null).ToList();
+            var ids = deals.Select(x => x.Id).Concat(rfqs.Select(r => r.Id)).ToList();
+            if (formRfq != null && !ids.Contains(formRfq)) formRfq = null;
+            if (ids.SequenceEqual(briefIds) && briefPick.ItemCount == ids.Count + 1) return;
+            briefIds = ids;
             formRfqs = rfqs;
-            var names = new[] { "The market as a whole" }.Concat(rfqs.Select(r => $"{D.Customer(r.CustomerId)?.Name}'s request (bids close {Calendar.DateLabel(r.CloseMonth * Calendar.WeeksPerMonth)})")).ToArray();
-            Fill(briefPick, names, formRfq == null ? 0 : 1 + rfqs.FindIndex(r => r.Id == formRfq));
+            var names = new[] { "The market as a whole" }
+                .Concat(deals.Select(x => $"Custom chip for {D.Client(x.ClientId)?.Name} (due {Calendar.DateLabel(x.DeadlineMonth * Calendar.WeeksPerMonth)})"))
+                .Concat(rfqs.Select(r => $"{D.Customer(r.CustomerId)?.Name}'s request (bids close {Calendar.DateLabel(r.CloseMonth * Calendar.WeeksPerMonth)})")).ToArray();
+            Fill(briefPick, names, formRfq == null ? 0 : 1 + ids.IndexOf(formRfq));
         }
 
         /// <summary>A design house plan is redone for the new node; a hand layout keeps its blocks, resized for the node.</summary>
@@ -333,6 +345,15 @@ namespace SiliconeTycoon.UI
             if (lacking.Count > 0)
                 box.AddChild(Ui.Wrap($"Buyers mark it down for lacking {string.Join(", ", lacking.Select(w => $"{Features.Name(w.Feature)} (−{w.Weight:P0})"))}." +
                                          (seg.RequiredAt(S.YearF).Any(f => !st.Features.Contains(f)) ? " Distributors won't stock it without " + Features.List(seg.RequiredAt(S.YearF).Where(f => !st.Features.Contains(f))) + "." : ""), 12, Ui.Warn));
+            var briefDeal = BriefDeal;
+            if (briefDeal != null)
+            {
+                var gaps = Specs.Check(D, briefDeal.Spec, draft, Binning.BinsFor(draft)[0].Name);
+                string who = D.Client(briefDeal.ClientId)?.Name;
+                box.AddChild(gaps.Count == 0
+                    ? Ui.Wrap($"Meets {who}'s spec. Once started it can only be sold to them.", 12, Ui.Ok)
+                    : Ui.Wrap($"Doesn't meet {who}'s spec yet: it {string.Join("; ", gaps)}.", 12, Ui.Bad));
+            }
             var briefRfq = BriefRfq;
             if (briefRfq != null)
             {
@@ -675,9 +696,12 @@ namespace SiliconeTycoon.UI
             draft.TargetClockMHz = clockSpin.Value;
             draft.Verification = verifSpin.Value / 100.0;
             draft.TimingEffort = timingSpin.Value / 100.0;
+            var deal = BriefDeal;
             string err = DesignOps.StartDesign(D, S, draft, team.Id);
             if (err == null)
             {
+                if (deal != null) Foundry.AssignChip(S, deal.Id, draft);
+                formRfq = null;
                 draft = null;
                 editing = false;
                 nameEdit.Text = "";

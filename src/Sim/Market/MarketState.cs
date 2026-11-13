@@ -86,6 +86,8 @@ namespace SiliconeTycoon.Sim
         public double Shortfall;
         public double LastMonthOrdered;
         public double LastMonthDelivered;
+        /// <summary>A fixed order every month (custom chips), instead of a share of the market. 0 = follow the market.</summary>
+        public double FixedMonthly;
     }
 
     public class CustomerState

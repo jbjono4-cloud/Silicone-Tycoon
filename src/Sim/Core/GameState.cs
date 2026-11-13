@@ -68,10 +68,17 @@ namespace SiliconeTycoon.Sim
 
         /// <summary>How often random events happen (0 = never, 1 = normal). Scripted history happens whenever it's above 0.</summary>
         public double EventRate = 1;
+        public StartType StartType = StartType.Integrated;
         public List<ActiveEffect> Effects = new List<ActiveEffect>();
         public List<Decision> Decisions = new List<Decision>();
         /// <summary>Scripted events that have happened (or were history before the game began).</summary>
         public List<string> FiredEvents = new List<string>();
+
+        public List<FoundryState> Foundries = new List<FoundryState>();
+        public List<ClientState> Clients = new List<ClientState>();
+        public List<WaferRfq> WaferRfqs = new List<WaferRfq>();
+        public List<WaferContract> WaferContracts = new List<WaferContract>();
+        public List<AsicDeal> AsicDeals = new List<AsicDeal>();
 
         [JsonIgnore] public double Cash => Ledger.Cash;
         [JsonIgnore] public int Year => Calendar.YearOf(Tick);

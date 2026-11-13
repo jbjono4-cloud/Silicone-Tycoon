@@ -86,7 +86,7 @@ namespace SiliconeTycoon.UI
             ReadText("res://data/nodes.json"), ReadText("res://data/locations.json"),
             ReadText("res://data/blocks.json"), ReadText("res://data/packages.json"),
             ReadText("res://data/segments.json"), ReadText("res://data/customers.json"), ReadText("res://data/rivals.json"),
-            ReadText("res://data/events.json"));
+            ReadText("res://data/events.json"), ReadText("res://data/foundries.json"), ReadText("res://data/clients.json"));
 
         // ================= start menu =================
         void ShowStart()
@@ -138,11 +138,25 @@ namespace SiliconeTycoon.UI
             eventRow.AddChild(Ui.L("Earthquakes, fires, strikes, recessions, booms... (Off also skips history's oil shocks and recessions.)", 12, Ui.Muted));
             box.AddChild(eventRow);
 
+            var starts = new[]
+            {
+                (type: StartType.Integrated, name: "Integrated", text: "Design chips and build your own fabs: the 10 µm process, $6M and six engineers."),
+                (type: StartType.Fabless, name: "Fabless", text: "No fab: ten engineers and less cash. Rent wafers from Meridian's wafer services (more foundries open later) and design for their processes."),
+                (type: StartType.Foundry, name: "Foundry", text: "A running 1,500-wafer 10 µm fab and three engineers: make other companies' wafers and custom chips, or your own."),
+            };
+            int startIdx = 0;
+            var startRow = Ui.H(10);
+            startRow.AddChild(Ui.L("Company type", 13, Ui.Muted));
+            var startText = Ui.Wrap(starts[0].text, 12, Ui.Muted);
+            startRow.AddChild(Ui.Options(starts.Select(x => x.name).ToArray(), 0, i => { startIdx = i; startText.Text = starts[i].text; }));
+            startRow.AddChild(startText);
+            box.AddChild(startRow);
+
             var row = Ui.H(10);
             row.AddChild(Ui.Primary("Found the company", () =>
             {
                 ulong seed = ulong.TryParse(seedEdit.Text.Trim(), out var v) ? v : 1;
-                StartGame(Simulation.NewGame(D, new NewGameOptions { CompanyName = nameEdit.Text, Seed = seed, EventRate = rates[rateIdx].rate }));
+                StartGame(Simulation.NewGame(D, new NewGameOptions { CompanyName = nameEdit.Text, Seed = seed, EventRate = rates[rateIdx].rate, StartType = starts[startIdx].type }));
             }));
             if (FileAccess.FileExists(SavePath)) row.AddChild(Ui.Btn("Continue saved game", () => LoadFromFile(SavePath)));
             if (FileAccess.FileExists(AutosavePath)) row.AddChild(Ui.Btn("Continue autosave", () => LoadFromFile(AutosavePath)));
@@ -204,6 +218,7 @@ namespace SiliconeTycoon.UI
             tabList.Add(new FabsTab(this));
             tabList.Add(new ResearchTab(this));
             tabList.Add(new MarketTab(this));
+            tabList.Add(new FoundryTab(this));
             foreach (var t in tabList) tabs.AddChild(t);
             tabs.TabChanged += _ => RefreshCurrent(force: true);
             root.AddChild(tabs);

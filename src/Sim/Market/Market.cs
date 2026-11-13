@@ -294,6 +294,9 @@ namespace SiliconeTycoon.Sim
         public static Rfq FindRfq(GameState s, string id) => s.Rfqs.FirstOrDefault(r => r.Id == id);
         public static CustomerState CustomerOf(GameState s, string id) => s.Customers.FirstOrDefault(c => c.Id == id);
 
+        /// <summary>A contract's buyer: a market customer or a custom chip client.</summary>
+        public static string BuyerName(GameData d, string id) => d.Customer(id)?.Name ?? d.Client(id)?.Name ?? id;
+
         public static string SupplierName(GameState s, string id) =>
             id == Player ? s.CompanyName : id == Others ? "another supplier" : Rivals.Get(s, id)?.Name ?? id;
 
@@ -502,6 +505,13 @@ namespace SiliconeTycoon.Sim
             foreach (var k in s.Contracts.Where(x => x.Status == ContractStatus.Active).ToList())
             {
                 var cust = d.Customer(k.CustomerId);
+                if (cust == null)
+                {
+                    // a custom chip client (see Foundry): fixed monthly orders, not a share of the market
+                    var cl = d.Client(k.CustomerId);
+                    if (cl == null) continue;
+                    cust = new CustomerDef { Id = cl.Id, Name = cl.Name, Country = cl.Country, SegmentId = cl.SegmentId ?? d.Segments[0].Id, From = cl.From, To = cl.To };
+                }
                 var rec = records[cust.SegmentId];
                 if (month > k.EndMonth)
                 {
@@ -511,7 +521,7 @@ namespace SiliconeTycoon.Sim
                 }
                 if (month < k.StartMonth) continue;
 
-                double ordered = cust.Active(s.Year) ? rec.Demand * cust.Share * k.VolumeShare : 0;
+                double ordered = k.FixedMonthly > 0 ? k.FixedMonthly : cust.Active(s.Year) ? rec.Demand * cust.Share * k.VolumeShare : 0;
                 if (k.MaxMonthly > 0) ordered = Math.Min(ordered, k.MaxMonthly);
                 double price = ContractPrice(k, month);
                 k.LastMonthOrdered = ordered;
@@ -556,14 +566,14 @@ namespace SiliconeTycoon.Sim
                 {
                     k.ShortMonths = 0;
                     AdjustRep(s, 0.002);
-                    cs.Satisfaction = Math.Min(1, cs.Satisfaction + 0.01);
+                    if (cs != null) cs.Satisfaction = Math.Min(1, cs.Satisfaction + 0.01);
                     continue;
                 }
 
                 k.Shortfall += missing;
                 s.Ledger.Book(Accounts.Penalties, -missing * price * PenaltyShare);
                 AdjustRep(s, -0.03 * shortShare);
-                cs.Satisfaction = Math.Max(0, cs.Satisfaction - 0.1 * shortShare);
+                if (cs != null) cs.Satisfaction = Math.Max(0, cs.Satisfaction - 0.1 * shortShare);
                 k.ShortMonths = shortShare > 0.5 ? k.ShortMonths + 1 : 0;
                 if (k.ShortMonths == 1)
                     s.Log($"You delivered only {got:N0} of the {ordered:N0} chips {cust.Name} ordered. They're charging penalties.", 3);
@@ -571,7 +581,7 @@ namespace SiliconeTycoon.Sim
                 {
                     k.Status = ContractStatus.Cancelled;
                     AdjustRep(s, -0.08);
-                    if (cs.ContractId == k.Id) Retender(s, cust, cs, month);
+                    if (cs != null && cs.ContractId == k.Id) Retender(s, cust, cs, month);
                     s.Log($"{cust.Name} cancels your contract after three months of missed deliveries.", 3);
                 }
             }

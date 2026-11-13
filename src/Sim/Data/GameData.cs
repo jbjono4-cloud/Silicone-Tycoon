@@ -148,6 +148,11 @@ namespace SiliconeTycoon.Sim
         public List<CustomerDef> Customers = new List<CustomerDef>();
         public List<RivalDef> Rivals = new List<RivalDef>();
         public List<EventDef> Events = new List<EventDef>();
+        public List<FoundryDef> Foundries = new List<FoundryDef>();
+        public List<ClientDef> Clients = new List<ClientDef>();
+
+        public FoundryDef Foundry(string id) => Foundries.FirstOrDefault(x => x.Id == id);
+        public ClientDef Client(string id) => Clients.FirstOrDefault(x => x.Id == id);
 
         public ProcessNodeDef Node(string id) => Nodes.FirstOrDefault(n => n.Id == id);
         public LocationDef Location(string id) => Locations.FirstOrDefault(l => l.Id == id);
@@ -158,7 +163,8 @@ namespace SiliconeTycoon.Sim
         public RivalDef Rival(string id) => Rivals.FirstOrDefault(x => x.Id == id);
 
         public static GameData FromJson(string nodesJson, string locationsJson, string blocksJson = null, string packagesJson = null,
-            string segmentsJson = null, string customersJson = null, string rivalsJson = null, string eventsJson = null)
+            string segmentsJson = null, string customersJson = null, string rivalsJson = null, string eventsJson = null,
+            string foundriesJson = null, string clientsJson = null)
         {
             var d = new GameData
             {
@@ -170,6 +176,8 @@ namespace SiliconeTycoon.Sim
                 Customers = customersJson == null ? new List<CustomerDef>() : JsonSerializer.Deserialize<List<CustomerDef>>(customersJson, SimJson.Data),
                 Rivals = rivalsJson == null ? new List<RivalDef>() : JsonSerializer.Deserialize<List<RivalDef>>(rivalsJson, SimJson.Data),
                 Events = eventsJson == null ? new List<EventDef>() : JsonSerializer.Deserialize<List<EventDef>>(eventsJson, SimJson.Data),
+                Foundries = foundriesJson == null ? new List<FoundryDef>() : JsonSerializer.Deserialize<List<FoundryDef>>(foundriesJson, SimJson.Data),
+                Clients = clientsJson == null ? new List<ClientDef>() : JsonSerializer.Deserialize<List<ClientDef>>(clientsJson, SimJson.Data),
             };
             var problems = d.Validate();
             if (problems.Count > 0) throw new InvalidOperationException("Game data problems:\n" + string.Join("\n", problems));
@@ -182,7 +190,8 @@ namespace SiliconeTycoon.Sim
             string Read(string name) => System.IO.File.ReadAllText(System.IO.Path.Combine(folder, name));
             return FromJson(Read("nodes.json"), Read("locations.json"), Read("blocks.json"), Read("packages.json"),
                 Read("segments.json"), Read("customers.json"), Read("rivals.json"),
-                System.IO.File.Exists(System.IO.Path.Combine(folder, "events.json")) ? Read("events.json") : null);
+                Optional("events.json"), Optional("foundries.json"), Optional("clients.json"));
+            string Optional(string name) => System.IO.File.Exists(System.IO.Path.Combine(folder, name)) ? Read(name) : null;
         }
 
         public List<string> Validate()
@@ -244,6 +253,20 @@ namespace SiliconeTycoon.Sim
             foreach (var x in Rivals)
                 foreach (var id in x.Segments)
                     if (Segment(id) == null) p.Add($"{x.Id}: unknown segment {id}");
+            foreach (var g in Foundries.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate foundry id {g.Key}");
+            foreach (var x in Foundries)
+            {
+                if (Location(x.LocationId) == null) p.Add($"{x.Id}: unknown location {x.LocationId}");
+                if (x.RivalId != null && Rival(x.RivalId) == null) p.Add($"{x.Id}: unknown rival {x.RivalId}");
+                if (x.Capacity <= 0 || x.Margin < 0 || x.Growth < 0) p.Add($"{x.Id}: bad capacity, margin or growth");
+            }
+            foreach (var g in Clients.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate client id {g.Key}");
+            foreach (var x in Clients)
+            {
+                if (x.Kind == ClientKind.Wafers && !Curves.Valid(x.Wafers)) p.Add($"{x.Id}: a wafer client needs Wafers [[year, wafers], ...]");
+                if (x.Kind == ClientKind.Asic && (Segment(x.SegmentId) == null || !Curves.Valid(x.Units))) p.Add($"{x.Id}: an ASIC client needs a SegmentId and Units");
+                if (x.CycleMonths < 6 || x.LeadMonths < 1 || x.PriceFactor <= 0) p.Add($"{x.Id}: bad cycle, lead time or price factor");
+            }
             foreach (var g in Events.GroupBy(x => x.Id).Where(g => g.Count() > 1)) p.Add($"Duplicate event id {g.Key}");
             foreach (var e in Events)
             {

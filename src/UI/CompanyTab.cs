@@ -9,7 +9,7 @@ namespace SiliconeTycoon.UI
     /// <summary>The company at a glance: last month's books, the bank, history charts, auto-pause settings and news.</summary>
     public partial class CompanyTab : GameTab
     {
-        VBoxContainer alerts, books, bank, standing, decisions, world;
+        VBoxContainer alerts, books, bank, standing, decisions, world, model;
         PanelContainer decisionCard;
         LineChart moneyChart, cashChart;
         RichTextLabel news;
@@ -49,6 +49,11 @@ namespace SiliconeTycoon.UI
             bank = Ui.V(6);
             kb.AddChild(bank);
             left.AddChild(bankCard);
+
+            var (modelCard, mb) = Ui.CardV("Business model");
+            model = Ui.V(4);
+            mb.AddChild(model);
+            left.AddChild(modelCard);
 
             var (repCard, rb) = Ui.CardV("Standing");
             standing = Ui.V(4);
@@ -102,6 +107,10 @@ namespace SiliconeTycoon.UI
             RefreshBooks();
             RefreshBank();
             RefreshStanding();
+            Ui.Clear(model);
+            model.AddChild(Ui.Title(Foundry.Model(S), 15));
+            model.AddChild(Ui.L(Foundry.SellsOwnChips(S) ? "Foundry clients see you as a competitor." : "Foundry clients trust you with their designs.", 12, Ui.Muted));
+            model.AddChild(Ui.Btn("Foundry tab", () => main.ShowTab("Foundry")));
             RefreshCharts();
             RefreshNews();
         }

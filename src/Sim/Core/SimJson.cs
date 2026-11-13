@@ -21,6 +21,7 @@ namespace SiliconeTycoon.Sim
         {
             IncludeFields = true,
             WriteIndented = false,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,   // the odd infinite limit in a chip's analysis
             Converters = { new JsonStringEnumConverter() },
         };
     }

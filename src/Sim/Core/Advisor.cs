@@ -133,6 +133,29 @@ namespace SiliconeTycoon.Sim
                     Add(2, "Fabs", $"You've promised customers up to {Format.Units(promised)} {c.Name} chips a month, but your {d.Node(c.NodeId).Name} fabs could make about {Format.Units(output)} flat out. Add capacity or expect penalties.");
             }
 
+            // ---- foundry business
+            foreach (var f in s.Fabs.Where(f => f.External && f.Producing))
+            {
+                if (f.PlannedStarts == 0)
+                    Add(2, "Fabs", $"You're paying for at least {f.MinTake:P0} of {f.Name}'s {f.Capacity:N0} wafers a month but have nothing planned on it. Put a chip into it.");
+                if (s.MonthIndex >= f.SupplyEndMonth - 2)
+                    Add(1, "Fabs", $"{f.Name}: the supply agreement ends {Calendar.DateLabel(f.SupplyEndMonth * Calendar.WeeksPerMonth)}. Renew it or move your chips.");
+            }
+            foreach (var deal in s.AsicDeals.Where(x => x.Status == AsicStatus.Offered))
+                Add(1, "Foundry", $"{d.Client(deal.ClientId)?.Name} is offering a custom chip deal ({Format.Big(deal.Nre)} fees). Answer by {Calendar.DateLabel(deal.ExpiresMonth * Calendar.WeeksPerMonth)}.");
+            foreach (var deal in s.AsicDeals.Where(x => x.Status == AsicStatus.Accepted))
+            {
+                var chip = s.Design(deal.DesignId);
+                int left = deal.DeadlineMonth - s.MonthIndex;
+                if (chip == null)
+                    Add(2, "Design", $"Start {d.Client(deal.ClientId)?.Name}'s custom chip on the Design tab (pick their spec as the brief): it's due in {left} months.");
+                else if (left <= 4 && chip.Stage != DesignStage.Released)
+                    Add(2, "Design", $"The {chip.Name} for {d.Client(deal.ClientId)?.Name} is due in {left} months and isn't released yet.");
+            }
+            int openWaferRfqs = s.WaferRfqs.Count(r => r.BidFabId == null);
+            if (openWaferRfqs > 0 && s.Fabs.Any(f => !f.External && f.Stage != FabStage.Closed))
+                Add(0, "Foundry", $"{openWaferRfqs} compan{(openWaferRfqs == 1 ? "y wants" : "ies want")} a foundry for their wafers.");
+
             // ---- research burden
             var lm = s.Ledger.LastMonth;
             if (lm != null && lm.Profit < 0 && lm.Lines.TryGetValue(Accounts.ProcessResearch, out var research) && -research > Math.Max(1, lm.Revenue) * 0.3)
@@ -149,7 +172,7 @@ namespace SiliconeTycoon.Sim
             int unbid = s.Rfqs.Count(r => !r.Bids.Any(b => b.BidderId == Market.Player));
             if (unbid > 0) Add(0, "Market", $"{unbid} customer{(unbid == 1 ? " is" : "s are")} asking for bids you haven't answered.");
             foreach (var k in s.Contracts.Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active && k.ShortMonths > 0))
-                Add(3, "Fabs", $"You're short on {d.Customer(k.CustomerId).Name}'s order ({k.ShortMonths} month{(k.ShortMonths == 1 ? "" : "s")} running; three and they cancel).");
+                Add(3, "Fabs", $"You're short on {Market.BuyerName(d, k.CustomerId)}'s order ({k.ShortMonths} month{(k.ShortMonths == 1 ? "" : "s")} running; three and they cancel).");
 
             return a.OrderByDescending(x => x.Severity).ToList();
         }
