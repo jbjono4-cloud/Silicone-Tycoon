@@ -201,7 +201,9 @@ namespace SiliconeTycoon.UI
         {
             var s = new SpinBox { MinValue = min, MaxValue = max, Step = step, Value = value, Prefix = prefix, Suffix = suffix };
             s.CustomMinimumSize = new Vector2(130, 0);
-            s.ValueChanged += v => onChange(v);
+            // Deferred: the handler often rebuilds the tab, which would pull this SpinBox out of the tree while it is still
+            // handling the click (it then can't start its repeat timer).
+            s.ValueChanged += v => Callable.From(() => onChange(v)).CallDeferred();
             return s;
         }
 
