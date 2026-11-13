@@ -13,6 +13,9 @@ namespace SiliconeTycoon.UI
         public GameData D;
 
         const string SavePath = "user://save.json";
+        const string AutosavePath = "user://autosave.json";
+        /// <summary>The final state of the last company that went under, kept for a post-mortem.</summary>
+        const string GameOverPath = "user://gameover.json";
         const string SettingsPath = "user://settings.cfg";
         /// <summary>Game weeks per real second at each speed.</summary>
         static readonly double[] WeeksPerSecond = { 0, 1, 2, 4, 8 };
@@ -128,7 +131,8 @@ namespace SiliconeTycoon.UI
                 ulong seed = ulong.TryParse(seedEdit.Text.Trim(), out var v) ? v : 1;
                 StartGame(Simulation.NewGame(D, new NewGameOptions { CompanyName = nameEdit.Text, Seed = seed }));
             }));
-            if (FileAccess.FileExists(SavePath)) row.AddChild(Ui.Btn("Continue saved game", LoadFromFile));
+            if (FileAccess.FileExists(SavePath)) row.AddChild(Ui.Btn("Continue saved game", () => LoadFromFile(SavePath)));
+            if (FileAccess.FileExists(AutosavePath)) row.AddChild(Ui.Btn("Continue autosave", () => LoadFromFile(AutosavePath)));
             box.AddChild(row);
 
             AddChild(startScreen);
@@ -268,6 +272,8 @@ namespace SiliconeTycoon.UI
                 Toast("Paused: " + pauseFor);
             }
 
+            if (!S.GameOver && Calendar.IsQuarterEnd(S.Tick - 1)) WriteSave(AutosavePath, quiet: true);
+
             RefreshTop();
             int month = S.MonthIndex;
             if (speed == 0 || month != lastRefreshMonth) RefreshCurrent(force: false);
@@ -275,6 +281,7 @@ namespace SiliconeTycoon.UI
             if (S.GameOver && !wasOver)
             {
                 SetSpeed(0);
+                WriteSave(GameOverPath, quiet: true);
                 var d = new AcceptDialog { Title = "The end", DialogText = S.EndText, OkButtonText = "Back to menu" };
                 d.Confirmed += () => ShowStart();
                 AddChild(d);
@@ -409,12 +416,18 @@ namespace SiliconeTycoon.UI
         // ================= saving =================
         void SaveToFile()
         {
+            if (S == null || S.GameOver) return;
+            WriteSave(SavePath, quiet: false);
+        }
+
+        void WriteSave(string path, bool quiet)
+        {
             if (S == null) return;
             try
             {
-                using var f = FileAccess.Open(SavePath, FileAccess.ModeFlags.Write);
+                using var f = FileAccess.Open(path, FileAccess.ModeFlags.Write);
                 f.StoreString(SaveGame.Serialize(S));
-                Toast("Game saved.");
+                if (!quiet) Toast("Game saved.");
             }
             catch (Exception ex)
             {
@@ -422,11 +435,11 @@ namespace SiliconeTycoon.UI
             }
         }
 
-        void LoadFromFile()
+        void LoadFromFile(string path)
         {
             try
             {
-                StartGame(SaveGame.Deserialize(ReadText(SavePath)));
+                StartGame(SaveGame.Deserialize(ReadText(path)));
             }
             catch (Exception ex)
             {
