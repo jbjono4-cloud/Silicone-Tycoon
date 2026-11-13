@@ -58,7 +58,7 @@ namespace SiliconeTycoon.UI
             toastL.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             toastL.CustomMinimumSize = new Vector2(420, 0);
             toast.AddChild(toastL);
-            toast.ZIndex = 10;
+            toast.ZIndex = 40;   // above the floorplan editor and decision pop-ups
 
             try
             {

@@ -75,15 +75,15 @@ namespace SiliconeTycoon.UI
             tuneRow = tune;
             formBody = b;
             tune.AddChild(Ui.L("Rated clock", 13, Ui.Muted));
-            clockSpin = Ui.Spin(0, 100, 0.05, 0, v => Reanalyze(), "", " MHz");
+            clockSpin = Ui.Spin(0, 100, 0.05, 0, v => { Reanalyze(); if (overlayOpen) RefreshEditor(); }, "", " MHz");
             clockSpin.TooltipText = "0 = 90% of what a typical die reaches";
             tune.AddChild(clockSpin);
             tune.AddChild(Ui.L("Verification", 13, Ui.Muted));
-            verifSpin = Ui.Spin(DesignOps.MinVerification * 100, DesignOps.MaxVerification * 100, 5, 30, v => Reanalyze(), "", "%");
+            verifSpin = Ui.Spin(DesignOps.MinVerification * 100, DesignOps.MaxVerification * 100, 5, 30, v => { Reanalyze(); if (overlayOpen) RefreshEditor(); }, "", "%");
             verifSpin.TooltipText = "Share of engineering time spent testing before tape-out. More means fewer bugs, but a longer project.";
             tune.AddChild(verifSpin);
             tune.AddChild(Ui.L("Timing closure", 13, Ui.Muted));
-            timingSpin = Ui.Spin(0, DesignLab.MaxTimingEffort * 100, 5, 0, v => Reanalyze(), "+", "%");
+            timingSpin = Ui.Spin(0, DesignLab.MaxTimingEffort * 100, 5, 0, v => { Reanalyze(); if (overlayOpen) RefreshEditor(); }, "+", "%");
             timingSpin.TooltipText = "Extra engineering spent closing timing: each 10% raises the clock a typical die reaches by 5%, but adds 15% to the design effort.";
             tune.AddChild(timingSpin);
             b.AddChild(tune);
@@ -494,8 +494,20 @@ namespace SiliconeTycoon.UI
             head.AddChild(Ui.L($"{n.Name} · {Calendar.DateLabel(S.Tick)} · {Format.Money(S.Cash)} in the bank · the game is paused while you edit", 13, Ui.Muted));
             head.AddChild(Ui.Spacer());
             head.AddChild(Ui.Btn("Close", () => { editing = false; RefreshEditor(); Reanalyze(); }, "Back to the Design tab; the draft keeps your layout"));
-            head.AddChild(Ui.Primary("Start the design", () => { StartDraft(); RefreshEditor(); }));
+            var go = Ui.Primary("Start the design", () => { StartDraft(); RefreshEditor(); });
+            string why = StartProblem();
+            go.Disabled = why != null;
+            go.TooltipText = why ?? "Hand the chip to your design team";
+            head.AddChild(go);
             editTools.AddChild(head);
+            var nameRow = Ui.H(8);
+            nameRow.AddChild(Ui.L("Name", 13, Ui.Muted));
+            var nameField = new LineEdit { Text = nameEdit.Text, CustomMinimumSize = new Vector2(180, 0) };
+            nameField.TextChanged += t => { nameEdit.Text = t; draft.Name = t; };
+            nameField.TextSubmitted += _ => RefreshEditor();
+            nameRow.AddChild(nameField);
+            if (why != null) nameRow.AddChild(Ui.Wrap("Can't start yet: " + why, 13, Ui.Bad));
+            editTools.AddChild(nameRow);
 
             // add a block
             var avail = D.Blocks.Where(x => x.Year <= S.Year).ToList();
@@ -639,6 +651,19 @@ namespace SiliconeTycoon.UI
         {
             Reanalyze();
             RefreshBins();
+        }
+
+        /// <summary>Why the draft can't be started right now (for the editor's button), or null.</summary>
+        string StartProblem()
+        {
+            if (draft == null) return "There's no draft.";
+            var team = S.DesignTeams.FirstOrDefault(t => t.ProjectId == null) ?? S.DesignTeams.FirstOrDefault();
+            if (team == null) return "You have no design team.";
+            draft.Name = nameEdit.Text;
+            draft.TargetClockMHz = clockSpin.Value;
+            draft.Verification = verifSpin.Value / 100.0;
+            draft.TimingEffort = timingSpin.Value / 100.0;
+            return DesignOps.CanStart(D, S, draft, team.Id);
         }
 
         void StartDraft()

@@ -71,19 +71,28 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
-        public static string StartDesign(GameData d, GameState s, ChipDesign c, string teamId)
+        /// <summary>Why a draft can't start with a team right now, or null if it can.</summary>
+        public static string CanStart(GameData d, GameState s, ChipDesign c, string teamId)
         {
             var team = Team(s, teamId);
             if (team == null) return "Choose a design team.";
-            if (team.ProjectId != null) return $"{team.Name} is busy on {s.Design(team.ProjectId)?.Name ?? "another chip"}.";
+            if (team.ProjectId != null) return $"{team.Name} is busy on the {s.Design(team.ProjectId)?.Name ?? "another chip"}. Wait for it to tape out, or cancel it.";
             if (team.Engineers <= 0) return $"{team.Name} has no engineers.";
             if (c.Stage != DesignStage.Draft) return "That chip is already under way.";
             if (string.IsNullOrWhiteSpace(c.Name)) return "Name the chip.";
             if (s.Designs.Any(x => x != c && x.Name == c.Name.Trim() && x.Stage != DesignStage.Cancelled)) return "You already have a chip with that name.";
-
             var st = DesignLab.Analyze(d, s, c);
             if (!st.Valid) return st.FirstError;
             if (s.Cash < st.DesignHouseFee) return $"The design house wants {Format.Money(st.DesignHouseFee)} up front.";
+            return null;
+        }
+
+        public static string StartDesign(GameData d, GameState s, ChipDesign c, string teamId)
+        {
+            string why = CanStart(d, s, c, teamId);
+            if (why != null) return why;
+            var team = Team(s, teamId);
+            var st = DesignLab.Analyze(d, s, c);
 
             c.Name = c.Name.Trim();
             if (c.Id == null) c.Id = s.NewId("chip");
