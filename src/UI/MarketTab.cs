@@ -256,22 +256,42 @@ namespace SiliconeTycoon.UI
                     string key = c.Id + "|" + bin.Name;
                     var listing = S.Listings.FirstOrDefault(l => l.DesignId == c.Id && l.Bin == bin.Name);
                     if (!listPrice.TryGetValue(key, out var price))
-                        price = listing?.Price ?? Math.Round(fits.Select(x => Market.ExpectedPrice(x, S.YearF)).DefaultIfEmpty(c.Stats.CostPerGoodDie * 1.5).Max(), 2);
+                        price = listing?.Price ?? Math.Round(fits.Select(x => Market.MarketPrice(S, x, S.YearF)).DefaultIfEmpty(c.Stats.CostPerGoodDie * 1.5).Max(), 2);
                     listPrice[key] = price;
                     var item = Market.StockOf(S, c.Id, bin.Name);
                     double stock = item?.Units ?? 0, sold = item?.SoldLastMonth ?? 0, made = item?.MadeLastMonth ?? 0;
                     var row = Ui.H(8);
                     row.AddChild(Ui.L($"{bin.Name}: {Ui.Units(stock)} in stock", 13));
                     row.AddChild(Ui.Spacer());
-                    row.AddChild(Ui.Spin(0.01, 100000, 0.05, price, v => listPrice[key] = v, "$"));
-                    row.AddChild(Ui.Btn(listing == null ? "List" : "Reprice", () => Act(Market.SetListing(S, c.Id, bin.Name, listPrice[key]))));
-                    if (listing != null) row.AddChild(Ui.Btn("Unlist", () => { listPrice.Remove(key); Act(Market.SetListing(S, c.Id, bin.Name, 0)); }));
+                    double goingNow = Market.GoingPrice(D, S, c, bin.Name);
+                    string binName = bin.Name;
+                    bool tracking = listing != null && listing.Track > 0;
+                    if (tracking) price = listing.Price;
+                    var spin = Ui.Spin(0.01, 100000, 0.05, price, v => listPrice[key] = v, "$");
+                    spin.Editable = !tracking;
+                    row.AddChild(spin);
+                    if (!tracking)
+                    {
+                        row.AddChild(Ui.Btn(listing == null ? "List" : "Reprice", () => Act(Market.SetListing(S, c.Id, binName, listPrice[key]))));
+                        if (goingNow > 0)
+                            row.AddChild(Ui.Btn("Price at market", () => { listPrice[key] = Math.Round(goingNow, 2); Act(Market.SetListing(S, c.Id, binName, listPrice[key])); }, $"List at what buyers are paying now ({Format.Money(goingNow)})"));
+                    }
+                    if (listing != null)
+                    {
+                        var follow = new CheckBox { Text = "Track the market", ButtonPressed = tracking, TooltipText = "Reprice every month to what buyers are paying (it rises while chips are scarce and falls as rivals catch up)" };
+                        follow.Toggled += on => Act(Market.TrackMarket(D, S, c.Id, binName, on ? 1.0 : 0));
+                        row.AddChild(follow);
+                        row.AddChild(Ui.Btn("Unlist", () => { listPrice.Remove(key); Act(Market.SetListing(S, c.Id, binName, 0)); }));
+                    }
                     b.AddChild(row);
                     b.AddChild(Ui.L(listing == null ? "   Not on sale to distributors." : $"   Listed at {Format.Money(listing.Price)} · costs about {Format.Money(c.Stats.CostPerGoodDie)} to make", 12, listing == null ? Ui.Warn : Ui.Muted));
                     if (fits.Count > 0)
                     {
                         double going = fits.Max(x => Market.MarketPrice(S, x, S.YearF));
-                        b.AddChild(Ui.L($"   Buyers are paying about {Format.Money(going)}{(listing != null && listing.Price > going * 1.15 ? " · you're well above it, so it will sell slowly" : "")}", 12, listing != null && listing.Price > going * 1.15 ? Ui.Warn : Ui.Muted));
+                        bool under = listing != null && listing.Price < going * 0.85 && sold > 0 && stock < sold * 0.25;
+                        string note = listing != null && listing.Price > going * 1.15 ? " · you're well above it, so it will sell slowly"
+                                    : under ? $" · you're selling out {1 - listing.Price / going:P0} under it: you could charge more" : "";
+                        b.AddChild(Ui.L($"   Buyers are paying about {Format.Money(going)}{note}", 12, note.Length > 0 ? Ui.Warn : Ui.Muted));
                     }
                     bool piling = stock >= 1000 && (sold <= 0 || stock > sold * Advisor.StockMonthsWarning);
                     b.AddChild(Ui.L($"   Last month: made {Ui.Units(made)}, sold {Ui.Units(sold)}" + (sold > 0 ? $" · {stock / sold:0.0} months of stock" : ""), 12, piling ? Ui.Warn : Ui.Muted));

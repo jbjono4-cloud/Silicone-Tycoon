@@ -352,5 +352,42 @@ namespace SiliconeTycoon.Sim.Tests
             Simulation.AdvanceMonths(D, b, 36);
             Assert.Equal(SaveGame.Serialize(a), SaveGame.Serialize(b));
         }
+
+        [Fact]
+        public void ListingsCanTrackTheMarketPrice()
+        {
+            var s = TestData.NewGame(year: 1975);
+            foreach (var r in s.Rivals) { r.Products.Clear(); r.Capacity = 0; }
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            Market.AddStock(s, c.Id, "Standard", 1000);
+            Assert.NotNull(Market.TrackMarket(D, s, c.Id, "Standard", 1));   // not listed yet
+            Assert.Null(Market.SetListing(s, c.Id, "Standard", 1));
+            Assert.Null(Market.TrackMarket(D, s, c.Id, "Standard", 1));
+            var l = s.Listings.Single();
+            Assert.Equal(Math.Round(Market.GoingPrice(D, s, c, "Standard"), 2), l.Price, 6);
+            Simulation.AdvanceMonths(D, s, 1);                               // sells out: chips are scarce
+            Assert.True(Market.LastShortage(s, "embedded") > 0.5);
+            Market.AddStock(s, c.Id, "Standard", 1000);
+            Simulation.AdvanceMonths(D, s, 1);
+            Assert.True(l.Price > Market.ExpectedPrice(D.Segment("embedded"), s.YearF) * 1.3, "the tracked price rises with the shortage");
+            Assert.Null(Market.SetListing(s, c.Id, "Standard", 5));
+            Assert.Equal(1, s.Listings.Single().Track);                      // repricing keeps tracking on
+        }
+
+        [Fact]
+        public void TheAdvisorSpotsUnderpricedChipsThatSellOut()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            Market.AddStock(s, c.Id, "Standard", 100);
+            var item = Market.StockOf(s, c.Id, "Standard");
+            item.SoldLastMonth = 20_000;
+            item.MadeLastMonth = 20_000;
+            double going = Market.GoingPrice(D, s, c, "Standard");
+            Market.SetListing(s, c.Id, "Standard", going * 0.5);
+            Assert.Contains(Advisor.Alerts(D, s), a => a.Text.Contains("sells out"));
+            Market.SetListing(s, c.Id, "Standard", going);
+            Assert.DoesNotContain(Advisor.Alerts(D, s), a => a.Text.Contains("sells out"));
+        }
     }
 }

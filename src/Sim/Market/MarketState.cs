@@ -20,6 +20,8 @@ namespace SiliconeTycoon.Sim
         public string DesignId;
         public string Bin;
         public double Price;
+        /// <summary>When above 0, the price follows what buyers are paying each month, times this (1 = the market price).</summary>
+        public double Track;
     }
 
     public class Bid

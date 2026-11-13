@@ -84,7 +84,10 @@ namespace SiliconeTycoon.Sim
                     else if (listing != null && fits.Count > 0)
                     {
                         double going = fits.Max(seg => Market.MarketPrice(s, seg, s.YearF));
-                        if (listing.Price > going * 1.15)
+                        bool sellingOut = sold > 0 && stock < sold * 0.25;
+                        if (listing.Track <= 0 && sellingOut && listing.Price < going * 0.85)
+                            Add(2, "Market", $"The {c.Name} sells out every month at {Format.Money(listing.Price)} while buyers are paying {Format.Money(going)}. Raise the price (or let it track the market).");
+                        else if (listing.Price > going * 1.15)
                             Add(0, "Market", $"The {c.Name} is listed at {Format.Money(listing.Price)}, above the going price of {Format.Money(going)}. It will sell slowly.");
                     }
                 }
@@ -116,6 +119,14 @@ namespace SiliconeTycoon.Sim
                     Add(0, "Fabs", $"{f.Name} has {f.Capacity - f.PlannedStarts:N0} wafer starts a month unplanned.");
                 else if (f.Stage == FabStage.Running && f.LastUtilisation < 0.5 && f.DesignId != null && !f.Expanding)
                     Add(0, "Fabs", $"{f.Name} ran at {f.LastUtilisation:P0} last month. An idle fab still costs its running costs and depreciation.");
+            }
+
+            // ---- research burden
+            var lm = s.Ledger.LastMonth;
+            if (lm != null && lm.Profit < 0 && lm.Lines.TryGetValue(Accounts.ProcessResearch, out var research) && -research > Math.Max(1, lm.Revenue) * 0.3)
+            {
+                int programmes = s.NodePrograms.Count(p => !p.Done);
+                Add(1, "Research", $"Process research costs {Format.Money(-research)} a month ({-research / Math.Max(1, lm.Revenue):P0} of revenue) across {programmes} programme{(programmes == 1 ? "" : "s")} while you're losing money. Running one at a time, or at a lower budget, eases the cash drain (at more risk of slipping).");
             }
 
             // ---- events

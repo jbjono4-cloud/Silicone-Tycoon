@@ -188,16 +188,40 @@ namespace SiliconeTycoon.Sim
             if (!HasBin(c, bin)) return $"The {c.Name} has no {bin} bin.";
             if (price < 0) return "The price can't be negative.";
             if (c.CustomFor != null && price > 0) return $"The {c.Name} was made for another customer.";
+            double track = s.Listings.FirstOrDefault(l => l.DesignId == designId && l.Bin == bin)?.Track ?? 0;
             s.Listings.RemoveAll(l => l.DesignId == designId && l.Bin == bin);
-            if (price > 0) s.Listings.Add(new Listing { DesignId = designId, Bin = bin, Price = price });
+            if (price > 0) s.Listings.Add(new Listing { DesignId = designId, Bin = bin, Price = price, Track = track });
             return null;
         }
 
         static double Attract(double perfRatio, double priceRatio, SegmentDef seg, double rep) =>
             Math.Pow(Math.Min(3, perfRatio), seg.PerfWeight) * Math.Pow(priceRatio, seg.PriceSensitivity) * rep;
 
+        /// <summary>What buyers pay for a chip bin this month in the best market that will stock it (0 if none will).</summary>
+        public static double GoingPrice(GameData d, GameState s, ChipDesign c, string bin) =>
+            d.Segments.Where(seg => seg.Active(s.YearF) && Qualifies(d, seg, c, bin, s.YearF)).Select(seg => MarketPrice(s, seg, s.YearF)).DefaultIfEmpty(0).Max();
+
+        /// <summary>Sets a listing to follow the market price (times <paramref name="factor"/>), or back to a fixed price with 0.</summary>
+        public static string TrackMarket(GameData d, GameState s, string designId, string bin, double factor)
+        {
+            var l = s.Listings.FirstOrDefault(x => x.DesignId == designId && x.Bin == bin);
+            if (l == null) return "List the chip first.";
+            if (factor < 0 || factor > 2) return "Track between 0% and 200% of the market price.";
+            l.Track = factor;
+            if (factor > 0) UpdateTracking(d, s, l);
+            return null;
+        }
+
+        static void UpdateTracking(GameData d, GameState s, Listing l)
+        {
+            var c = s.Design(l.DesignId);
+            double going = c == null ? 0 : GoingPrice(d, s, c, l.Bin);
+            if (going > 0) l.Price = Math.Round(going * l.Track, 2);
+        }
+
         static void OpenMarket(GameData d, GameState s, double year, Dictionary<string, MarketRecord> records)
         {
+            foreach (var l in s.Listings.Where(x => x.Track > 0)) UpdateTracking(d, s, l);
             bool soldOpen = false;
             foreach (var seg in d.Segments)
             {
