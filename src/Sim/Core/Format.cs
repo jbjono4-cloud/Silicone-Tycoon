@@ -18,5 +18,13 @@ namespace SiliconeTycoon.Sim
         }
 
         public static string Pct(double v) => (v * 100).ToString("0.0") + "%";
+
+        /// <summary>A count of things: 950, 12k, 3.4M.</summary>
+        public static string Units(double v)
+        {
+            if (v >= 1e6) return (v / 1e6).ToString("0.0") + "M";
+            if (v >= 1e4) return (v / 1e3).ToString("0") + "k";
+            return v.ToString("N0");
+        }
     }
 }

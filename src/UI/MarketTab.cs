@@ -192,14 +192,23 @@ namespace SiliconeTycoon.UI
                     if (!listPrice.TryGetValue(key, out var price))
                         price = listing?.Price ?? Math.Round(fits.Select(x => Market.ExpectedPrice(x, S.YearF)).DefaultIfEmpty(c.Stats.CostPerGoodDie * 1.5).Max(), 2);
                     listPrice[key] = price;
+                    var item = Market.StockOf(S, c.Id, bin.Name);
+                    double stock = item?.Units ?? 0, sold = item?.SoldLastMonth ?? 0, made = item?.MadeLastMonth ?? 0;
                     var row = Ui.H(8);
-                    row.AddChild(Ui.L($"{bin.Name}: {Ui.Units(Market.Stock(S, c.Id, bin.Name))} in stock", 13));
+                    row.AddChild(Ui.L($"{bin.Name}: {Ui.Units(stock)} in stock", 13));
                     row.AddChild(Ui.Spacer());
                     row.AddChild(Ui.Spin(0.01, 100000, 0.05, price, v => listPrice[key] = v, "$"));
                     row.AddChild(Ui.Btn(listing == null ? "List" : "Reprice", () => Act(Market.SetListing(S, c.Id, bin.Name, listPrice[key]))));
                     if (listing != null) row.AddChild(Ui.Btn("Unlist", () => { listPrice.Remove(key); Act(Market.SetListing(S, c.Id, bin.Name, 0)); }));
                     b.AddChild(row);
                     b.AddChild(Ui.L(listing == null ? "   Not on sale to distributors." : $"   Listed at {Format.Money(listing.Price)} · costs about {Format.Money(c.Stats.CostPerGoodDie)} to make", 12, listing == null ? Ui.Warn : Ui.Muted));
+                    if (fits.Count > 0)
+                    {
+                        double going = fits.Max(x => Market.ExpectedPrice(x, S.YearF));
+                        b.AddChild(Ui.L($"   Going price {Format.Money(going)}{(listing != null && listing.Price > going * 1.15 ? " · you're well above it, so it will sell slowly" : "")}", 12, listing != null && listing.Price > going * 1.15 ? Ui.Warn : Ui.Muted));
+                    }
+                    bool piling = stock >= 1000 && (sold <= 0 || stock > sold * Advisor.StockMonthsWarning);
+                    b.AddChild(Ui.L($"   Last month: made {Ui.Units(made)}, sold {Ui.Units(sold)}" + (sold > 0 ? $" · {stock / sold:0.0} months of stock" : ""), 12, piling ? Ui.Warn : Ui.Muted));
                 }
             }
             return card;

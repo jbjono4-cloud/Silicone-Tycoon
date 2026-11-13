@@ -246,11 +246,6 @@ namespace SiliconeTycoon.UI
         /// <summary>Escapes text for a BBCode label.</summary>
         public static string Esc(string s) => s.Replace("[", "[lb]");
 
-        public static string Units(double v)
-        {
-            if (v >= 1e6) return (v / 1e6).ToString("0.0") + "M";
-            if (v >= 1e4) return (v / 1e3).ToString("0") + "k";
-            return v.ToString("N0");
-        }
+        public static string Units(double v) => SiliconeTycoon.Sim.Format.Units(v);
     }
 }

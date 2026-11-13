@@ -8,6 +8,10 @@ namespace SiliconeTycoon.Sim
         public string DesignId;
         public string Bin;
         public double Units;
+        public double MadeThisMonth;
+        public double SoldThisMonth;
+        public double MadeLastMonth;
+        public double SoldLastMonth;
     }
 
     /// <summary>A chip offered to distributors at a list price, in every segment where it qualifies.</summary>

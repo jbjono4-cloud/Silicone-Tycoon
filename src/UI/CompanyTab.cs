@@ -9,7 +9,7 @@ namespace SiliconeTycoon.UI
     /// <summary>The company at a glance: last month's books, the bank, history charts, auto-pause settings and news.</summary>
     public partial class CompanyTab : GameTab
     {
-        VBoxContainer books, bank, standing;
+        VBoxContainer alerts, books, bank, standing;
         LineChart moneyChart, cashChart;
         RichTextLabel news;
 
@@ -22,6 +22,11 @@ namespace SiliconeTycoon.UI
             var ls = Ui.Scroll(left);
             ls.SizeFlagsStretchRatio = 1.3f;
             AddChild(ls);
+
+            var (alertCard, ab) = Ui.CardV("Things to look at");
+            alerts = Ui.V(6);
+            ab.AddChild(alerts);
+            left.AddChild(alertCard);
 
             var (booksCard, bb) = Ui.CardV("Last month");
             books = Ui.V(3);
@@ -78,11 +83,28 @@ namespace SiliconeTycoon.UI
         public override void Refresh()
         {
             if (S == null || books == null) return;
+            RefreshAlerts();
             RefreshBooks();
             RefreshBank();
             RefreshStanding();
             RefreshCharts();
             RefreshNews();
+        }
+
+        void RefreshAlerts()
+        {
+            Ui.Clear(alerts);
+            var list = Advisor.Alerts(D, S);
+            if (list.Count == 0) alerts.AddChild(Ui.L("Nothing needs your attention.", 13, Ui.Ok));
+            foreach (var al in list)
+            {
+                var row = Ui.H(8);
+                var l = Ui.Wrap(al.Text, 13, al.Severity >= 3 ? Ui.Bad : al.Severity == 2 ? Ui.Warn : Ui.Fg);
+                row.AddChild(l);
+                string tab = al.Tab;
+                if (tab != "Company") row.AddChild(Ui.Btn(tab, () => main.ShowTab(tab)));
+                alerts.AddChild(row);
+            }
         }
 
         void RefreshBooks()
@@ -134,7 +156,7 @@ namespace SiliconeTycoon.UI
             bank.AddChild(row);
 
             var recent = S.Ledger.Months.Skip(Math.Max(0, S.Ledger.Months.Count - 3)).ToList();
-            double cashFlow = recent.Count == 0 ? 0 : recent.Average(x => x.Profit - x.Capex - x.Lines.Where(l => l.Key == Accounts.Depreciation || l.Key == Accounts.FabClosure || l.Key == Accounts.Retooling).Sum(l => l.Value));
+            double cashFlow = Advisor.MonthlyCashFlow(S);
             if (S.Cash < 0)
                 bank.AddChild(Ui.Wrap($"Overdrawn for {S.OverdrawnMonths} month{(S.OverdrawnMonths == 1 ? "" : "s")}. After {Simulation.MaxOverdrawnMonths} the company is bankrupt.", 14, Ui.Bad));
             else if (cashFlow < 0)

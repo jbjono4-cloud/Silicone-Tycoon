@@ -179,6 +179,12 @@ namespace SiliconeTycoon.UI
                 Cell("Expected yield", $"{YieldModel.Yield(d0, chip.DieAreaMm2):P0}");
                 Cell("Dies per wafer", $"{YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(chip.DieAreaMm2)):N0}");
                 Cell("Good dies a month", Ui.Units(FabOps.AvailableCapacity(D, f) * YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(chip.DieAreaMm2)) * YieldModel.Yield(d0, chip.DieAreaMm2)));
+                double made = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.MadeLastMonth);
+                double sold = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.SoldLastMonth);
+                double stock = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.Units);
+                bool piling = stock >= 1000 && (sold <= 0 || stock > sold * Advisor.StockMonthsWarning);
+                Cell("Made / sold last month", $"{Ui.Units(made)} / {Ui.Units(sold)} (all fabs)", made > sold * 1.1 ? Ui.Warn : null);
+                Cell("In the warehouse", sold > 0 ? $"{Ui.Units(stock)} ({stock / sold:0.0} months)" : Ui.Units(stock), piling ? Ui.Warn : null);
             }
             Cell("Running cost", $"{Format.Money(FabOps.RunningCost(D, S, f))}/mo");
             Cell("Wafer materials", $"{Format.Money(FabOps.WaferCost(D, S, f))}");

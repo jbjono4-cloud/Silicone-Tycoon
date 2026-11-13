@@ -97,6 +97,7 @@ namespace SiliconeTycoon.Sim
                 s.Inventory.Add(it);
             }
             it.Units += units;
+            it.MadeThisMonth += units;
         }
 
         static double Take(GameState s, string designId, string bin, double units)
@@ -105,6 +106,7 @@ namespace SiliconeTycoon.Sim
             if (it == null || units <= 0) return 0;
             double t = Math.Min(units, it.Units);
             it.Units -= t;
+            it.SoldThisMonth += t;
             return t;
         }
 
@@ -396,7 +398,15 @@ namespace SiliconeTycoon.Sim
                     s.Log($"You win {cust.Name}'s design{part}: up to {mine.units:N0} chips a month for {r.LengthMonths} months from " +
                           $"{Calendar.DateLabel(r.StartMonth * Calendar.WeeksPerMonth)}, at {Format.Money(mine.bid.Price)} each.", 1);
                 }
-                else if (playerBid) s.Log($"{cust.Name} picks {primary} over your bid.", 2);
+                else if (playerBid)
+                {
+                    var won = awards.Count > 0 ? awards[0].bid : null;
+                    var ours = r.Bids.First(b => b.BidderId == Player);
+                    string why = won != null
+                        ? $"{primary} won at {Format.Money(won.Price)} a chip; you bid {Format.Money(ours.Price)}."
+                        : $"No bid beat the industry's offer of a just-adequate chip at about {Format.Money(r.ExpectedPrice * OthersPriceFactor)}; you bid {Format.Money(ours.Price)}.";
+                    s.Log($"{cust.Name} picks {primary} over your bid. {why}", 2);
+                }
                 else if (cs.SupplierId != Others) s.Log($"{cust.Name} picks {primary} for its next product.", 0);
             }
             s.Contracts.RemoveAll(k => k.Status != ContractStatus.Active && k.EndMonth < month - 24);
@@ -525,7 +535,14 @@ namespace SiliconeTycoon.Sim
             foreach (var seg in d.Segments)
                 if (seg.Active(year)) s.MarketHistory.Add(records[seg.Id]);
             if (s.MarketHistory.Count > MaxHistory) s.MarketHistory.RemoveRange(0, s.MarketHistory.Count - MaxHistory);
-            s.Inventory.RemoveAll(x => x.Units <= 0.5);
+            foreach (var it in s.Inventory)
+            {
+                it.MadeLastMonth = it.MadeThisMonth;
+                it.SoldLastMonth = it.SoldThisMonth;
+                it.MadeThisMonth = 0;
+                it.SoldThisMonth = 0;
+            }
+            s.Inventory.RemoveAll(x => x.Units <= 0.5 && x.MadeLastMonth <= 0 && x.SoldLastMonth <= 0);
         }
     }
 }

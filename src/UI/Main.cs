@@ -25,6 +25,7 @@ namespace SiliconeTycoon.UI
         TabContainer tabs;
         readonly List<GameTab> tabList = new List<GameTab>();
         Label dateL, cashL, repL, nameL;
+        Button alertBtn;
         Button[] speedBtns;
         PanelContainer toast;
         Label toastL;
@@ -160,7 +161,8 @@ namespace SiliconeTycoon.UI
             dateL = Ui.L("", 18, Ui.Accent);
             cashL = Ui.L("", 16);
             repL = Ui.L("", 14, Ui.Muted);
-            top.AddChild(nameL); top.AddChild(dateL); top.AddChild(cashL); top.AddChild(repL); top.AddChild(Ui.Spacer());
+            alertBtn = Ui.Btn("", () => ShowTab("Company"), "Things to look at, on the Company tab");
+            top.AddChild(nameL); top.AddChild(dateL); top.AddChild(cashL); top.AddChild(repL); top.AddChild(alertBtn); top.AddChild(Ui.Spacer());
             speedBtns = new Button[WeeksPerSecond.Length];
             for (int i = 0; i < speedBtns.Length; i++)
             {
@@ -296,6 +298,15 @@ namespace SiliconeTycoon.UI
             cashL.Text = Format.Money(S.Cash) + (S.Ledger.Debt > 0 ? $"  (debt {Format.Big(S.Ledger.Debt)})" : "");
             cashL.AddThemeColorOverride("font_color", S.Cash < 0 ? Ui.Bad : Ui.Fg);
             repL.Text = $"Reputation {S.Rep * 100:+0;-0;0} ({GameState.RepWord(S.Rep)})";
+            if (Calendar.WeekInMonth(S.Tick) == 0 || speed == 0)
+            {
+                var alerts = Advisor.Alerts(D, S);
+                int serious = alerts.Count(a => a.Severity >= 2);
+                alertBtn.Text = alerts.Count == 0 ? "All clear" : $"{alerts.Count} alert{(alerts.Count == 1 ? "" : "s")}";
+                var col = serious > 0 && alerts.Any(a => a.Severity >= 3) ? Ui.Bad : serious > 0 ? Ui.Warn : Ui.Muted;
+                alertBtn.AddThemeColorOverride("font_color", col);
+                alertBtn.AddThemeColorOverride("font_hover_color", col);
+            }
         }
 
         /// <summary>Refreshes the visible tab, unless the player is typing in it.</summary>
