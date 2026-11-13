@@ -156,8 +156,8 @@ namespace SiliconeTycoon.UI
                 var best = chips.OrderByDescending(c => Market.Perf(c, Binning.BinsFor(c)[0].Name, seg.Metric)).First();
                 double spareNow = Market.EstimatedOutput(D, S, best) - Market.Committed(S, best.Id, r.StartMonth);
                 double volumeNow = r.EstimatedUnits * Market.ContractUpside;
-                double units = spareNow >= volumeNow ? 0 : Math.Max(0, Math.Floor(spareNow / 500) * 500);
-                d = new BidDraft { ChipId = best.Id, Price = Math.Round(r.ExpectedPrice * 0.95, 2), Units = units };
+                double startUnits = spareNow >= volumeNow ? 0 : Math.Max(0, Math.Floor(spareNow / 500) * 500);
+                d = new BidDraft { ChipId = best.Id, Price = Math.Round(r.ExpectedPrice * 0.95, 2), Units = startUnits };
                 drafts[r.Id] = d;
             }
             if (!chips.Any(c => c.Id == d.ChipId)) d.ChipId = chips[0].Id;
