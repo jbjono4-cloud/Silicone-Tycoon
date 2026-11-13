@@ -40,6 +40,8 @@ namespace SiliconeTycoon.Sim
                 foreach (var r in s.Rivals)
                     if (r.ProductionNodes.Count == 0) r.ProductionNodes = new System.Collections.Generic.List<string>(r.NodesReady);
             }
+            foreach (var f in s.Fabs)
+                if (f.Producing && f.Learning > FabOps.Experience(s, f.NodeId)) s.NodeExperience[f.NodeId] = f.Learning;
             s.SaveVersion = Version;
         }
     }

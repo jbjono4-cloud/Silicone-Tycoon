@@ -84,6 +84,28 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void ScarceChipsFetchMore()
+        {
+            var s = TestData.NewGame(year: 1975);
+            foreach (var r in s.Rivals) { r.Products.Clear(); r.Capacity = 0; }
+            var seg = D.Segment("embedded");
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            Market.AddStock(s, c.Id, "Standard", 1000);   // far less than distributors want
+            Market.SetListing(s, c.Id, "Standard", Market.ExpectedPrice(seg, s.YearF) * 1.6);
+            Simulation.AdvanceMonths(D, s, 1);
+            Assert.True(Market.LastShortage(s, "embedded") > 0.9);
+            Assert.True(Market.MarketPrice(s, seg, s.YearF) > Market.ExpectedPrice(seg, s.YearF) * 1.8);
+            Assert.Equal(0, Market.Stock(s, c.Id, "Standard"), 6);   // sold out even at 1.6x
+
+            var plenty = TestData.NewGame(year: 1975);
+            var c2 = ReleasedChip(plenty, "n6um", Metric.Control);
+            Market.AddStock(plenty, c2.Id, "Standard", 1e9);
+            Market.SetListing(plenty, c2.Id, "Standard", 1);
+            Simulation.AdvanceMonths(D, plenty, 1);
+            Assert.Equal(0, Market.LastShortage(plenty, "embedded"), 6);
+        }
+
+        [Fact]
         public void DistributorsWontStockWeakChips()
         {
             var s = TestData.NewGame(year: 1984);

@@ -114,7 +114,10 @@ namespace SiliconeTycoon.UI
             quoteBox.AddChild(Ui.Row("Process engineering (recommended)", $"{Format.Money(q.RecommendedEngineering)} a month"));
             quoteBox.AddChild(Ui.Row("Wafer materials", $"{Format.Money(q.WaferCost)} a wafer"));
             quoteBox.AddChild(Ui.Row("Depreciation once built", $"{Format.Money(q.NetCapex / FabOps.DepreciationMonths)} a month"));
-            quoteBox.AddChild(Ui.Row("Defect density", $"{n.D0Launch:0.0} → {n.D0Mature:0.0} per cm²"));
+            double head = FabOps.StartingLearning(D, S, formNode);
+            quoteBox.AddChild(Ui.Row("Defect density", $"{LearningCurve.D0(n, head):0.0} at start → {n.D0Mature:0.0} per cm²"));
+            if (head > 0.05) quoteBox.AddChild(Ui.Wrap($"Your experience gives it a {head:0.0}-month head start on learning (so far; it grows while your other fabs run).", 12, Ui.Ok));
+            else if (n.Requires != null) quoteBox.AddChild(Ui.Wrap($"No experience to draw on: running a {D.Node(n.Requires).Name} fab first would give it a head start.", 12, Ui.Muted));
             if (q.Problem != null) quoteBox.AddChild(Ui.Wrap(q.Problem, 13, Ui.Bad));
             else if (S.Cash < q.NetCapex / q.BuildMonths) quoteBox.AddChild(Ui.Wrap($"You need {Format.Money(q.NetCapex / q.BuildMonths)} for the first month.", 13, Ui.Bad));
         }
@@ -273,7 +276,7 @@ namespace SiliconeTycoon.UI
             var row = Ui.H(10);
             row.AddChild(Ui.L("Retool to", 14, Ui.Muted));
             row.AddChild(Ui.Options(newer.Select(n => n.Name).ToArray(), newer.FindIndex(n => n.Id == target), i => { retoolChoice[f.Id] = newer[i].Id; Refresh(); }));
-            row.AddChild(Ui.L($"{Format.Big(q.NetCapex)}, down {q.BuildMonths} months, {Format.Big(f.BookValue * FabOps.RetoolWriteOff)} written off", 13, Ui.Muted));
+            row.AddChild(Ui.L($"{Format.Big(q.NetCapex)}, down {q.BuildMonths} months, {Format.Big(f.BookValue * FabOps.RetoolWriteOff)} written off · starts at D0 {LearningCurve.D0(D.Node(target), FabOps.StartingLearning(D, S, target)):0.0}", 13, Ui.Muted));
             row.AddChild(Ui.Btn("Retool", () => Act(FabOps.Retool(D, S, f, retoolChoice[f.Id]))));
             box.AddChild(row);
             if (q.Problem != null) box.AddChild(Ui.L(q.Problem, 12, Ui.Bad));

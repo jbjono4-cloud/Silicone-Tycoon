@@ -24,6 +24,8 @@ namespace SiliconeTycoon.Sim
         public double SlipRoll = 1;
         /// <summary>Hidden: extra work if it slips, as a share of the planned work.</summary>
         public double SlipSize;
+        /// <summary>Your fab experience on the previous node, in months of learning (updated weekly).</summary>
+        public double PriorExperience;
         public double Spent;
         public bool Warned;
         public bool Done;
@@ -40,10 +42,15 @@ namespace SiliconeTycoon.Sim
         public const double MajorSlipShare = 0.25;
         /// <summary>How budget turns into speed: weekly progress = budget^this. 2× budget is about 23% faster.</summary>
         public const double BudgetSpeedExponent = 0.3;
+        /// <summary>Months of experience on the previous node that halve the chance of a slip.</summary>
+        public const double ExperienceHalfMonths = 18;
 
         /// <summary>Chance the programme slips. Doubling the budget cuts it by about 65%; halving it nearly triples it.</summary>
-        public static double SlipChance(ProcessNodeDef n, double spendFactor) =>
-            Math.Clamp(n.SlipRisk / Math.Pow(Math.Clamp(spendFactor, MinSpend, MaxSpend), 1.5), 0, 0.9);
+        public static double SlipChance(ProcessNodeDef n, double spendFactor, double experienceMonths = 0) =>
+            Math.Clamp(n.SlipRisk / Math.Pow(Math.Clamp(spendFactor, MinSpend, MaxSpend), 1.5) / (1 + Math.Max(0, experienceMonths) / ExperienceHalfMonths), 0, 0.9);
+
+        /// <summary>Your experience on the node before this one, which makes its research less likely to slip.</summary>
+        public static double PriorExperience(GameData d, GameState s, ProcessNodeDef n) => FabOps.Experience(s, n.Requires);
 
         /// <summary>Weeks of normal-budget work done per week at a budget multiplier.</summary>
         public static double Speed(double spendFactor) => Math.Pow(Math.Clamp(spendFactor, MinSpend, MaxSpend), BudgetSpeedExponent);
@@ -52,7 +59,7 @@ namespace SiliconeTycoon.Sim
         public static double AverageFactor(NodeProgram p) => p.WeeksDone > 0 ? p.FactorWeeks / p.WeeksDone : p.SpendFactor;
 
         /// <summary>Hidden: whether the programme is heading for a slip at the average budget so far.</summary>
-        public static bool WillSlip(ProcessNodeDef n, NodeProgram p) => p.SlipRoll < SlipChance(n, AverageFactor(p));
+        public static bool WillSlip(ProcessNodeDef n, NodeProgram p) => p.SlipRoll < SlipChance(n, AverageFactor(p), p.PriorExperience);
 
         /// <summary>Hidden: total work the programme needs, in weeks at the normal budget.</summary>
         public static double RequiredWork(ProcessNodeDef n, NodeProgram p) => p.PlannedWeeks * (1 + (WillSlip(n, p) ? p.SlipSize : 0));
@@ -137,6 +144,7 @@ namespace SiliconeTycoon.Sim
                 p.Spent += cost;
                 p.WeeksDone++;
                 p.FactorWeeks += p.SpendFactor;
+                p.PriorExperience = PriorExperience(d, s, n);
                 p.Progress += Speed(p.SpendFactor);
 
                 double need = RequiredWork(n, p);

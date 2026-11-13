@@ -63,6 +63,9 @@ namespace SiliconeTycoon.UI
                 var rec = S.MarketHistory.LastOrDefault(r => r.SegmentId == seg.Id && r.Month == last);
                 double share = rec == null || rec.Demand <= 0 ? 0 : rec.PlayerUnits / rec.Demand;
                 b.AddChild(Ui.Title(seg.Name, 16));
+                double shortage = Market.LastShortage(S, seg.Id);
+                if (shortage > 0.05)
+                    b.AddChild(Ui.L($"Chips are scarce: distributors couldn't get {shortage:P0} of what they wanted last month, so buyers are paying up to {Format.Money(Market.MarketPrice(S, seg, S.YearF))}.", 13, Ui.Ok));
                 b.AddChild(Ui.L($"{Ui.Units(seg.DemandAt(S.YearF))} chips a month ({seg.OpenShare:P0} through distributors) · going price {Format.Money(Market.ExpectedPrice(seg, S.YearF))} · " +
                                 $"competitive {seg.Metric.ToString().ToLower()} {seg.NeedAt(S.YearF):0.00} · under {seg.MaxPowerW:0.#} W", 13, Ui.Muted));
                 b.AddChild(Ui.L($"You sold {Ui.Units(rec?.PlayerUnits ?? 0)} last month ({share:P1} of the market){(rec != null && rec.PlayerRevenue > 0 ? $" for {Format.Big(rec.PlayerRevenue)}" : "")}", 13, share > 0 ? Ui.Ok : Ui.Muted));
@@ -204,8 +207,8 @@ namespace SiliconeTycoon.UI
                     b.AddChild(Ui.L(listing == null ? "   Not on sale to distributors." : $"   Listed at {Format.Money(listing.Price)} · costs about {Format.Money(c.Stats.CostPerGoodDie)} to make", 12, listing == null ? Ui.Warn : Ui.Muted));
                     if (fits.Count > 0)
                     {
-                        double going = fits.Max(x => Market.ExpectedPrice(x, S.YearF));
-                        b.AddChild(Ui.L($"   Going price {Format.Money(going)}{(listing != null && listing.Price > going * 1.15 ? " · you're well above it, so it will sell slowly" : "")}", 12, listing != null && listing.Price > going * 1.15 ? Ui.Warn : Ui.Muted));
+                        double going = fits.Max(x => Market.MarketPrice(S, x, S.YearF));
+                        b.AddChild(Ui.L($"   Buyers are paying about {Format.Money(going)}{(listing != null && listing.Price > going * 1.15 ? " · you're well above it, so it will sell slowly" : "")}", 12, listing != null && listing.Price > going * 1.15 ? Ui.Warn : Ui.Muted));
                     }
                     bool piling = stock >= 1000 && (sold <= 0 || stock > sold * Advisor.StockMonthsWarning);
                     b.AddChild(Ui.L($"   Last month: made {Ui.Units(made)}, sold {Ui.Units(sold)}" + (sold > 0 ? $" · {stock / sold:0.0} months of stock" : ""), 12, piling ? Ui.Warn : Ui.Muted));

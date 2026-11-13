@@ -48,6 +48,8 @@ namespace SiliconeTycoon.Sim
         public List<string> NodesReady = new List<string>();
         public List<NodeProgram> NodePrograms = new List<NodeProgram>();
         public List<Fab> Fabs = new List<Fab>();
+        /// <summary>Best process learning (months) any of your fabs has reached on each node. Carries over to new fabs and research.</summary>
+        public Dictionary<string, double> NodeExperience = new Dictionary<string, double>();
         public List<ChipDesign> Designs = new List<ChipDesign>();
         public List<DesignTeam> DesignTeams = new List<DesignTeam>();
 

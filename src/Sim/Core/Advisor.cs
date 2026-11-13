@@ -83,7 +83,7 @@ namespace SiliconeTycoon.Sim
                         Add(2, "Market", $"The {c.Name} isn't listed with distributors, so {Format.Units(stock)} chips are sitting unsold.");
                     else if (listing != null && fits.Count > 0)
                     {
-                        double going = fits.Max(seg => Market.ExpectedPrice(seg, s.YearF));
+                        double going = fits.Max(seg => Market.MarketPrice(s, seg, s.YearF));
                         if (listing.Price > going * 1.15)
                             Add(0, "Market", $"The {c.Name} is listed at {Format.Money(listing.Price)}, above the going price of {Format.Money(going)}. It will sell slowly.");
                     }

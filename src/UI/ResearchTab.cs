@@ -66,7 +66,7 @@ namespace SiliconeTycoon.UI
                 ctl.AddChild(Ui.L($"{Format.Money(ProcessResearch.WeeklyCost(S, n, p) * Calendar.WeeksPerMonth)} a month · speed ×{ProcessResearch.Speed(p.SpendFactor):0.00} · spent {Format.Big(p.Spent)}", 13, Ui.Muted));
                 b.AddChild(ctl);
                 double avg = ProcessResearch.AverageFactor(p);
-                b.AddChild(Ui.L($"Average budget so far {avg:0.00}× · chance of a slip at that average {ProcessResearch.SlipChance(n, avg):P0}", 12, Ui.Muted));
+                b.AddChild(Ui.L($"Average budget so far {avg:0.00}× · {p.PriorExperience:0} months of experience on {(n.Requires != null ? D.Node(n.Requires).Name : "—")} · chance of a slip {ProcessResearch.SlipChance(n, avg, p.PriorExperience):P0}", 12, Ui.Muted));
                 if (p.Warned) b.AddChild(Ui.Wrap("Test wafers keep failing. Nobody knows how late this will be; the money keeps going out until it works. Raising the budget can still pull it back.", 12, Ui.Bad));
                 else b.AddChild(Ui.Wrap("More budget speeds the work up and, over time, lowers the chance of a slip. Cutting it saves cash but raises the risk.", 12, Ui.Muted));
                 b.AddChild(Ui.Btn("Cancel programme", () => Act(ProcessResearch.Cancel(D, S, n.Id))));
@@ -79,12 +79,19 @@ namespace SiliconeTycoon.UI
             start.AddChild(Ui.L("Budget", 14, Ui.Muted));
             start.AddChild(Ui.Spin(ProcessResearch.MinSpend, ProcessResearch.MaxSpend, 0.1, factor, v => { budget[n.Id] = v; Refresh(); }, "", "× normal"));
             int months = (int)Math.Ceiling(n.ResearchMonths / ProcessResearch.Speed(factor));
-            start.AddChild(Ui.L($"{Format.Money(ProcessResearch.WeeklyCost(S, n, factor) * Calendar.WeeksPerMonth)} a month for about {months} months ({Format.Big(ProcessResearch.WeeklyCost(S, n, factor) * Calendar.WeeksPerMonth * months)}) · {ProcessResearch.SlipChance(n, factor):P0} chance of slipping", 13, Ui.Muted));
+            start.AddChild(Ui.L($"{Format.Money(ProcessResearch.WeeklyCost(S, n, factor) * Calendar.WeeksPerMonth)} a month for about {months} months ({Format.Big(ProcessResearch.WeeklyCost(S, n, factor) * Calendar.WeeksPerMonth * months)}) · {ProcessResearch.SlipChance(n, factor, ProcessResearch.PriorExperience(D, S, n)):P0} chance of slipping", 13, Ui.Muted));
             var go = Ui.Btn("Start research", () => Act(ProcessResearch.Start(D, S, n.Id, budget.TryGetValue(n.Id, out var bf) ? bf : 1.0)));
             go.Disabled = why != null;
             start.AddChild(go);
             b.AddChild(start);
             if (why != null) b.AddChild(Ui.L(why, 12, Ui.Muted));
+            else if (n.Requires != null)
+            {
+                double exp = ProcessResearch.PriorExperience(D, S, n);
+                b.AddChild(Ui.L(exp > 0.05
+                    ? $"Your {exp:0} months of {D.Node(n.Requires).Name} fab experience cut the slip risk (it keeps growing while that fab runs)."
+                    : $"No {D.Node(n.Requires).Name} fab experience yet: running one would cut the slip risk.", 12, exp > 0.05 ? Ui.Ok : Ui.Muted));
+            }
             return card;
         }
 

@@ -148,5 +148,7 @@ namespace SiliconeTycoon.Sim
         public double PlayerUnits;
         public double RivalUnits;
         public double PlayerRevenue;
+        /// <summary>Share of distributor demand nobody could supply this month (0-1).</summary>
+        public double Shortage;
     }
 }

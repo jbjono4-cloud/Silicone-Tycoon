@@ -119,6 +119,12 @@ namespace SiliconeTycoon.Sim
         public const double RetoolWriteOff = 0.7;
         /// <summary>Expansion build time as a share of the node's normal build time.</summary>
         public const double ExpandTimeShare = 0.5;
+        /// <summary>Share of your learning on the previous node a new fab on the next node starts with.</summary>
+        public const double PrevNodeTransfer = 0.4;
+        /// <summary>Share of your learning on the same node a second fab starts with.</summary>
+        public const double SameNodeTransfer = 0.6;
+        /// <summary>Most months of learning a new fab can start with.</summary>
+        public const double MaxTransfer = 12;
         public const int MinExpansion = 100;
         public const int MinCapacity = 100;
         public const int MaxCapacity = 200000;
@@ -411,6 +417,7 @@ namespace SiliconeTycoon.Sim
                 f.MonthlyDepreciation = f.BookValue / DepreciationMonths;
                 f.Stage = FabStage.Ramping;
                 f.RunningWeeks = 0;
+                f.Learning = Math.Max(f.Learning, StartingLearning(d, s, f.NodeId));
                 s.Log(f.Retooling
                     ? $"{f.Name} is back up on {n.Name}. First wafers are going in; yields will start poor and improve."
                     : $"{f.Name} is built. First wafers are going in; yields will start poor and improve.", 1);
@@ -484,8 +491,25 @@ namespace SiliconeTycoon.Sim
             f.Lots.RemoveAll(l => l.Done && l.Delivered && l.DoneTick < s.Tick - KeepLotsWeeks);
         }
 
+        /// <summary>Experience on a node: the best learning any of your fabs has reached on it.</summary>
+        public static double Experience(GameState s, string nodeId) =>
+            nodeId != null && s.NodeExperience.TryGetValue(nodeId, out var v) ? v : 0;
+
+        /// <summary>
+        /// Months of learning a fab starts with on a node when it comes up: part of your experience on the same node (a
+        /// second fab) or the node before it, whichever is more, up to <see cref="MaxTransfer"/>.
+        /// </summary>
+        public static double StartingLearning(GameData d, GameState s, string nodeId)
+        {
+            var n = d.Node(nodeId);
+            double same = Experience(s, nodeId) * SameNodeTransfer;
+            double prev = n?.Requires == null ? 0 : Experience(s, n.Requires) * PrevNodeTransfer;
+            return Math.Min(MaxTransfer, Math.Max(same, prev));
+        }
+
         public static void MonthEnd(GameData d, GameState s, Fab f)
         {
+            if (f.Producing && f.Learning > Experience(s, f.NodeId)) s.NodeExperience[f.NodeId] = f.Learning;
             if (f.Stage == FabStage.Construction)
             {
                 double perMonth = f.Capex / (f.BuildWeeksTotal / (double)Calendar.WeeksPerMonth);

@@ -234,7 +234,7 @@ namespace SiliconeTycoon.UI
             planBox.AddChild(Ui.Row($"{seg.Metric}", $"{perf:0.00} (competitive today: {need:0.00}, next year: {seg.NeedAt(S.YearF + 1):0.00})", perf < need * Market.OpenMarketMinShare ? Ui.Bad : perf < need ? Ui.Warn : Ui.Ok));
             planBox.AddChild(Ui.Row("Dies per wafer", $"{st.DiesPerWafer:N0} at about {st.YieldEstimate:P0} yield"));
             planBox.AddChild(Ui.Row("Cost per good chip", Format.Money(st.CostPerGoodDie)));
-            planBox.AddChild(Ui.Row("Going price today", Format.Money(Market.ExpectedPrice(seg, S.YearF))));
+            planBox.AddChild(Ui.Row("Buyers paying today", Format.Money(Market.MarketPrice(S, seg, S.YearF))));
             planBox.AddChild(Ui.Rule());
             int weeks = team == null || team.Engineers == 0 ? 0 : (int)Math.Ceiling(st.EngineerMonths / team.Engineers * Calendar.WeeksPerMonth);
             planBox.AddChild(Ui.Row("Design effort", $"{st.EngineerMonths:0} engineer-months ≈ {weeks / Calendar.WeeksPerMonth} months with {team?.Engineers ?? 0} engineers"));

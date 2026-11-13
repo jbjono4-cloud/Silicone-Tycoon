@@ -177,6 +177,18 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void ExperienceOnThePreviousNodeCutsSlipRisk()
+        {
+            Assert.Equal(ProcessResearch.SlipChance(N8, 1.0) / 2, ProcessResearch.SlipChance(N8, 1.0, ProcessResearch.ExperienceHalfMonths), 9);
+            var s = TestData.NewGame();
+            FabOps.Build(D, s, null, "n10um", "us_ca", 1000);
+            Simulation.AdvanceMonths(D, s, 30);
+            ProcessResearch.Start(D, s, "n8um");
+            Simulation.Advance(D, s);
+            Assert.True(ProcessResearch.Active(s, "n8um").PriorExperience > 5);
+        }
+
+        [Fact]
         public void CancellingStopsTheProgramme()
         {
             var s = TestData.NewGame();

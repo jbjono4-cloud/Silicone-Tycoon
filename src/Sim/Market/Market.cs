@@ -43,6 +43,16 @@ namespace SiliconeTycoon.Sim
         public const int MaxHistory = 1500;
         /// <summary>Contracts cap monthly orders at the customer's forecast times this; the rest goes to second sources.</summary>
         public const double ContractUpside = 1.3;
+        /// <summary>How much more buyers pay when chips are scarce: up to this much extra when nothing is available.</summary>
+        public const double ShortagePremium = 1.0;
+
+        /// <summary>The segment's shortage last month (0 = plenty of chips, 1 = none to be had).</summary>
+        public static double LastShortage(GameState s, string segmentId) =>
+            s.MarketHistory.LastOrDefault(r => r.SegmentId == segmentId)?.Shortage ?? 0;
+
+        /// <summary>What buyers will pay this month: the going price, raised while chips are scarce.</summary>
+        public static double MarketPrice(GameState s, SegmentDef seg, double year) =>
+            ExpectedPrice(seg, year) * (1 + ShortagePremium * LastShortage(s, seg.Id));
 
         public static double YearOfMonth(int month) => Calendar.YearF(month * Calendar.WeeksPerMonth);
 
@@ -160,7 +170,6 @@ namespace SiliconeTycoon.Sim
                 double demand = rec.OpenDemand;
                 if (demand <= 0) continue;
                 double need = seg.NeedAt(year);
-                double expected = ExpectedPrice(seg, year);
 
                 var offers = new List<(string supplier, Listing listing, RivalState rival, double attract, double price)>();
                 foreach (var l in s.Listings)
@@ -170,15 +179,27 @@ namespace SiliconeTycoon.Sim
                     double perf = Perf(c, l.Bin, seg.Metric);
                     if (perf < need * OpenMarketMinShare || Power(c, l.Bin) > seg.MaxPowerW) continue;
                     if (Stock(s, l.DesignId, l.Bin) <= 0) continue;
-                    offers.Add((Player, l, null, Attract(perf / need, expected / l.Price, seg, s.RepFactor), l.Price));
+                    offers.Add((Player, l, null, 0, l.Price));
                 }
                 foreach (var r in s.Rivals)
                 {
                     var p = Rivals.OpenMarketOffer(d, s, r, seg);
                     if (p == null) continue;
-                    double price = Rivals.Price(s, r, p, seg);
-                    double perf = Perf(p.Design, Rivals.BinOf(p), seg.Metric);
-                    offers.Add((r.Id, null, r, Attract(perf / need, expected / price, seg, GameState.RepFactorOf(r.Rep)), price));
+                    offers.Add((r.Id, null, r, 0, Rivals.Price(s, r, p, seg)));
+                }
+
+                // scarcity: when the chips on offer can't cover demand, buyers pay more
+                double supply = offers.Sum(o => o.supplier == Player ? Stock(s, o.listing.DesignId, o.listing.Bin) : Math.Max(0, o.rival.Capacity - o.rival.UsedThisMonth));
+                rec.Shortage = Math.Clamp((demand - supply) / demand, 0, 1);
+                double expected = ExpectedPrice(seg, year) * (1 + ShortagePremium * rec.Shortage);
+                for (int i = 0; i < offers.Count; i++)
+                {
+                    var o = offers[i];
+                    double perf = o.supplier == Player
+                        ? Perf(s.Design(o.listing.DesignId), o.listing.Bin, seg.Metric)
+                        : Perf(Rivals.OpenMarketOffer(d, s, o.rival, seg).Design, Rivals.BinOf(Rivals.OpenMarketOffer(d, s, o.rival, seg)), seg.Metric);
+                    double rep = o.supplier == Player ? s.RepFactor : GameState.RepFactorOf(o.rival.Rep);
+                    offers[i] = (o.supplier, o.listing, o.rival, Attract(perf / need, expected / o.price, seg, rep), o.price);
                 }
                 if (offers.Count == 0) continue;
 
@@ -316,7 +337,7 @@ namespace SiliconeTycoon.Sim
                 int close = month + BidWindowMonths;
                 int start = close + cust.LeadMonths;
                 double startYear = YearOfMonth(start);
-                double expected = ExpectedPrice(seg, startYear);
+                double expected = ExpectedPrice(seg, startYear) * (1 + ShortagePremium * LastShortage(s, seg.Id));
                 var rfq = new Rfq
                 {
                     Id = s.NewId("rfq"),

@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Xunit;
 
@@ -263,6 +264,41 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.True(FabOps.RunningCost(D, s, f) > running);
             Simulation.AdvanceMonths(D, s, 2);
             Assert.Equal(1500, f.LastMonthStarts);
+        }
+
+        [Fact]
+        public void FabsOnTheNextNodeStartWithYourExperience()
+        {
+            var s = WithNodes("n10um", "n8um");
+            var old = Build(s);
+            Simulation.AdvanceMonths(D, s, 36);
+            double exp = FabOps.Experience(s, "n10um");
+            Assert.True(exp > 10, $"experience {exp}");
+            var f = Build(s, node: "n8um");
+            Simulation.AdvanceWeeks(D, s, BuildWeeks);
+            Assert.Equal(FabStage.Ramping, f.Stage);
+            Assert.Equal(Math.Min(FabOps.MaxTransfer, FabOps.Experience(s, "n10um") * FabOps.PrevNodeTransfer), f.Learning, 1);
+            Assert.True(FabOps.D0(D, f) < D.Node("n8um").D0Launch - 1);
+        }
+
+        [Fact]
+        public void ASecondFabOnTheSameNodeStartsAhead()
+        {
+            var s = TestData.NewGame();
+            Build(s);
+            Simulation.AdvanceMonths(D, s, 30);
+            var second = Build(s);
+            Simulation.AdvanceWeeks(D, s, BuildWeeks);
+            Assert.True(second.Learning >= FabOps.MaxTransfer - 1e-9 || second.Learning > 5);
+        }
+
+        [Fact]
+        public void WithoutExperienceFabsStartFromScratch()
+        {
+            var s = WithNodes("n10um", "n8um");
+            var f = Build(s, node: "n8um");
+            Simulation.AdvanceWeeks(D, s, BuildWeeks);
+            Assert.Equal(0, f.Learning, 9);
         }
 
         [Fact]
