@@ -6,7 +6,7 @@ namespace SiliconeTycoon.Sim
     /// <summary>Saves are the whole <see cref="GameState"/> as JSON, versioned so old saves can be migrated.</summary>
     public static class SaveGame
     {
-        public const int Version = 1;
+        public const int Version = 2;
 
         public static string Serialize(GameState s) => JsonSerializer.Serialize(s, SimJson.Save);
 
@@ -22,6 +22,18 @@ namespace SiliconeTycoon.Sim
         static void Migrate(GameState s)
         {
             if (s.Rng == null) s.Rng = new Rng(s.Seed);
+            if (s.SaveVersion < 2)
+            {
+                // research programmes had a fixed hidden length; carry it over as a slip that has already happened (or not)
+                foreach (var p in s.NodePrograms)
+                {
+                    p.Progress = p.WeeksDone;
+                    p.FactorWeeks = p.WeeksDone * p.SpendFactor;
+                    bool slipped = p.ActualWeeks > p.PlannedWeeks;
+                    p.SlipRoll = slipped ? 0 : 1;
+                    p.SlipSize = slipped && p.PlannedWeeks > 0 ? (p.ActualWeeks - p.PlannedWeeks) / (double)p.PlannedWeeks : 0;
+                }
+            }
             s.SaveVersion = Version;
         }
     }

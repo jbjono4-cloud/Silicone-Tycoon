@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -30,14 +31,20 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.NotNull(ProcessResearch.CanStart(D, s, "n8um", 5));
         }
 
+        static ProcessNodeDef N8 => D.Node("n8um");
+
+        /// <summary>Weeks a programme needs at a constant budget.</summary>
+        static int WeeksNeeded(NodeProgram p) => (int)Math.Ceiling(ProcessResearch.RequiredWork(N8, p) / ProcessResearch.Speed(p.SpendFactor) - 1e-9);
+
         [Fact]
-        public void FinishesAfterItsRealLength()
+        public void FinishesWhenTheWorkIsDone()
         {
             var s = TestData.NewGame(seed: 3);
             Assert.Null(ProcessResearch.Start(D, s, "n8um"));
             var p = ProcessResearch.Active(s, "n8um");
-            Assert.True(p.ActualWeeks >= p.PlannedWeeks);
-            Simulation.AdvanceWeeks(D, s, p.ActualWeeks - 1);
+            int weeks = WeeksNeeded(p);
+            Assert.True(weeks >= p.PlannedWeeks);
+            Simulation.AdvanceWeeks(D, s, weeks - 1);
             Assert.False(s.NodeReady("n8um"));
             Simulation.Advance(D, s);
             Assert.True(s.NodeReady("n8um"));
@@ -51,7 +58,7 @@ namespace SiliconeTycoon.Sim.Tests
             var b = TestData.NewGame(seed: 9);
             ProcessResearch.Start(D, a, "n8um", 0.6);
             ProcessResearch.Start(D, b, "n8um", 0.6);
-            Assert.Equal(ProcessResearch.Active(a, "n8um").ActualWeeks, ProcessResearch.Active(b, "n8um").ActualWeeks);
+            Assert.Equal(ProcessResearch.RequiredWork(N8, ProcessResearch.Active(a, "n8um")), ProcessResearch.RequiredWork(N8, ProcessResearch.Active(b, "n8um")));
         }
 
         static int Slips(double spend)
@@ -61,8 +68,7 @@ namespace SiliconeTycoon.Sim.Tests
             {
                 var s = TestData.NewGame(seed: seed);
                 ProcessResearch.Start(D, s, "n8um", spend);
-                var p = ProcessResearch.Active(s, "n8um");
-                if (p.ActualWeeks > p.PlannedWeeks) slips++;
+                if (ProcessResearch.WillSlip(N8, ProcessResearch.Active(s, "n8um"))) slips++;
             }
             return slips;
         }
@@ -76,14 +82,14 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.True(rich < 40);
         }
 
-        static GameState SlippedGame(out NodeProgram p)
+        static GameState SlippedGame(out NodeProgram p, double spend = 0.5)
         {
             for (ulong seed = 1; ; seed++)
             {
                 var s = TestData.NewGame(seed: seed);
-                ProcessResearch.Start(D, s, "n8um", 0.5);
+                ProcessResearch.Start(D, s, "n8um", spend);
                 p = ProcessResearch.Active(s, "n8um");
-                if (p.ActualWeeks > p.PlannedWeeks) return s;
+                if (ProcessResearch.WillSlip(N8, p)) return s;
             }
         }
 
@@ -91,11 +97,83 @@ namespace SiliconeTycoon.Sim.Tests
         public void SlipsCostMoreAndWarnYou()
         {
             var s = SlippedGame(out var p);
-            var n = D.Node("n8um");
-            Simulation.AdvanceWeeks(D, s, p.ActualWeeks);
+            double work = ProcessResearch.RequiredWork(N8, p);
+            Simulation.AdvanceWeeks(D, s, WeeksNeeded(p));
             Assert.True(p.Done);
-            Assert.True(p.Spent >= n.ResearchCost * 0.5 * p.ActualWeeks / p.PlannedWeeks * 0.999);
+            Assert.True(p.WeeksDone > p.PlannedWeeks);
+            Assert.True(p.Spent >= N8.ResearchCost * 0.5 * work / p.PlannedWeeks * 0.999);
             Assert.Contains(s.News, x => x.Severity == 3 && x.Text.Contains("running late"));
+        }
+
+        [Fact]
+        public void BudgetCanChangeMidProgramme()
+        {
+            var s = TestData.NewGame();
+            Assert.Null(ProcessResearch.Start(D, s, "n8um"));
+            Assert.NotNull(ProcessResearch.SetBudget(D, s, "n8um", 3));
+            Assert.NotNull(ProcessResearch.SetBudget(D, s, "n6um", 1.5));
+            Simulation.AdvanceMonths(D, s, 1);
+            double slowCost = s.Ledger.LastMonth.Lines[Accounts.ProcessResearch];
+            Assert.Null(ProcessResearch.SetBudget(D, s, "n8um", 2.0));
+            Simulation.AdvanceMonths(D, s, 1);
+            Assert.InRange(s.Ledger.LastMonth.Lines[Accounts.ProcessResearch] / slowCost, 1.95, 2.05);   // twice the money (give or take a month's inflation)
+            var p = ProcessResearch.Active(s, "n8um");
+            double expected = 4 * ProcessResearch.Speed(1.0) + 4 * ProcessResearch.Speed(2.0);
+            Assert.Equal(expected, p.Progress, 9);
+            Assert.Equal(1.5, ProcessResearch.AverageFactor(p), 9);
+        }
+
+        [Fact]
+        public void MoreBudgetFinishesSooner()
+        {
+            int Weeks(double spend)
+            {
+                var s = TestData.NewGame(seed: 4);
+                ProcessResearch.Start(D, s, "n8um", spend);
+                var p = ProcessResearch.Active(s, "n8um");
+                p.SlipRoll = 1;   // no slip, to compare like with like
+                int w = 0;
+                while (!p.Done && w < 500) { Simulation.Advance(D, s); w++; }
+                return w;
+            }
+            Assert.True(Weeks(2.0) < Weeks(1.0));
+            Assert.True(Weeks(0.5) > Weeks(1.0));
+        }
+
+        [Fact]
+        public void RaisingTheBudgetCanRescueASlippingProgramme()
+        {
+            // find a programme that slips at 0.5× but not once the average budget reaches 1.6×
+            for (ulong seed = 1; seed < 2000; seed++)
+            {
+                var s = TestData.NewGame(seed: seed);
+                ProcessResearch.Start(D, s, "n8um", 0.5);
+                var p = ProcessResearch.Active(s, "n8um");
+                if (!ProcessResearch.WillSlip(N8, p) || p.SlipRoll < ProcessResearch.SlipChance(N8, 1.6)) continue;
+                Simulation.AdvanceMonths(D, s, 2);
+                Assert.True(ProcessResearch.WillSlip(N8, p));
+                Assert.Null(ProcessResearch.SetBudget(D, s, "n8um", 2.0));
+                for (int i = 0; i < 400 && ProcessResearch.WillSlip(N8, p); i++) Simulation.Advance(D, s);
+                Assert.False(ProcessResearch.WillSlip(N8, p));
+                return;
+            }
+            Assert.Fail("No seed slipped at a low budget but not a high one");
+        }
+
+        [Fact]
+        public void OldSavesKeepTheirResearchOutcome()
+        {
+            var s = TestData.NewGame();
+            ProcessResearch.Start(D, s, "n8um");
+            var p = ProcessResearch.Active(s, "n8um");
+            p.WeeksDone = 10;
+            p.ActualWeeks = p.PlannedWeeks + 20;
+            s.SaveVersion = 1;
+            var loaded = SaveGame.Deserialize(SaveGame.Serialize(s));
+            var q = ProcessResearch.Active(loaded, "n8um");
+            Assert.Equal(10, q.Progress, 9);
+            Assert.True(ProcessResearch.WillSlip(N8, q));
+            Assert.Equal(q.PlannedWeeks + 20, ProcessResearch.RequiredWork(N8, q), 6);
         }
 
         [Fact]
