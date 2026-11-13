@@ -48,7 +48,8 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Contains("oil_crisis", s.FiredEvents);
             Assert.Equal(crisis.Factor, Events.DemandFactor(s, "embedded"), 9);
             var rec = s.MarketHistory.Last(r => r.SegmentId == "embedded");
-            Assert.Equal(D.Segment("embedded").DemandAt(Calendar.YearF(rec.Month * Calendar.WeeksPerMonth)) * crisis.Factor, rec.Demand, 0);
+            double monthEnd = Calendar.YearF(rec.Month * Calendar.WeeksPerMonth + Calendar.WeeksPerMonth - 1);   // the market settles in the month's last week
+            Assert.Equal(D.Segment("embedded").DemandAt(monthEnd) * crisis.Factor, rec.Demand, 0);
             Assert.True(Events.MaterialsFactor(s) > 1);
             Simulation.AdvanceMonths(d, s, crisis.Months + 1);
             Assert.DoesNotContain(s.Effects, e => e.EventId == "oil_crisis");
