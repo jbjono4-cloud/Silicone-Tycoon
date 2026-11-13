@@ -22,6 +22,8 @@ namespace SiliconeTycoon.Sim
         public const double MinMarkup = 1.1;
         /// <summary>Smallest capacity a rival keeps, in chips a month.</summary>
         public const double MinCapacity = 2000;
+        /// <summary>Rivals bid for up to this multiple of their capacity, counting on growing into it.</summary>
+        public const double BidHeadroom = 1.3;
         /// <summary>How far a price war can push the price factor, as a share of normal.</summary>
         public const double PriceWarFloor = 0.5;
 
@@ -114,12 +116,18 @@ namespace SiliconeTycoon.Sim
                         .OrderByDescending(x => Market.Perf(x.Design, BinOf(x), seg.Metric) / Cost(s, x))
                         .FirstOrDefault();
                     if (p == null) continue;
+                    // only promise what the fabs can make: capacity (plus some room to grow) less what's already promised
+                    double committed = s.Contracts.Where(k => k.SupplierId == r.Id && k.Status == ContractStatus.Active && k.EndMonth >= rfq.StartMonth).Sum(k => k.MaxMonthly);
+                    double spare = r.Capacity * BidHeadroom - committed;
+                    double volume = rfq.EstimatedUnits * Market.ContractUpside;
+                    if (spare < rfq.EstimatedUnits * Market.MinBidShare) continue;
                     rfq.Bids.Add(new Bid
                     {
                         BidderId = r.Id,
                         DesignId = p.Design.Id,
                         Bin = BinOf(p),
                         Price = Math.Min(rfq.MaxPrice, Math.Max(Cost(s, p) * MinMarkup, rfq.ExpectedPrice * r.PriceFactor)),
+                        MaxUnits = spare >= volume ? 0 : Math.Floor(spare),
                         SubmittedTick = s.Tick,
                     });
                 }

@@ -121,6 +121,18 @@ namespace SiliconeTycoon.Sim
                     Add(0, "Fabs", $"{f.Name} ran at {f.LastUtilisation:P0} last month. An idle fab still costs its running costs and depreciation.");
             }
 
+            // ---- contracts you can't fill
+            foreach (var g in s.Contracts.Where(k => k.SupplierId == Market.Player && k.Status == ContractStatus.Active && k.EndMonth >= s.MonthIndex)
+                                         .GroupBy(k => k.DesignId))
+            {
+                var c = s.Design(g.Key);
+                if (c == null) continue;
+                double promised = g.Sum(k => k.MaxMonthly > 0 ? k.MaxMonthly : k.LastMonthOrdered);
+                double output = Market.EstimatedOutput(d, s, c);
+                if (promised > output * 1.05)
+                    Add(2, "Fabs", $"You've promised customers up to {Format.Units(promised)} {c.Name} chips a month, but your {d.Node(c.NodeId).Name} fabs could make about {Format.Units(output)} flat out. Add capacity or expect penalties.");
+            }
+
             // ---- research burden
             var lm = s.Ledger.LastMonth;
             if (lm != null && lm.Profit < 0 && lm.Lines.TryGetValue(Accounts.ProcessResearch, out var research) && -research > Math.Max(1, lm.Revenue) * 0.3)

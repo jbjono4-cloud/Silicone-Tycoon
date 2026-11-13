@@ -528,6 +528,16 @@ namespace SiliconeTycoon.Sim
                     k.Delivered += made;
                     k.LastMonthDelivered = made;
                     rec.RivalUnits += made;
+                    // rivals are held to their contracts too: three bad months and the customer walks
+                    k.ShortMonths = ordered > 0 && made < ordered * 0.5 ? k.ShortMonths + 1 : 0;
+                    if (k.ShortMonths >= 3)
+                    {
+                        k.Status = ContractStatus.Cancelled;
+                        if (rival != null) rival.Rep = Math.Max(-1, rival.Rep - 0.05);
+                        var rcs = CustomerOf(s, k.CustomerId);
+                        if (rcs != null && rcs.ContractId == k.Id) Retender(s, cust, rcs, month);
+                        s.Log($"{cust.Name} cancels {SupplierName(s, k.SupplierId)}'s contract after three months of missed deliveries and will ask for new bids.", 1);
+                    }
                     continue;
                 }
 
@@ -561,15 +571,46 @@ namespace SiliconeTycoon.Sim
                 {
                     k.Status = ContractStatus.Cancelled;
                     AdjustRep(s, -0.08);
-                    if (cs.ContractId == k.Id)
-                    {
-                        cs.SupplierId = Others;
-                        cs.ContractId = null;
-                    }
+                    if (cs.ContractId == k.Id) Retender(s, cust, cs, month);
                     s.Log($"{cust.Name} cancels your contract after three months of missed deliveries.", 3);
                 }
             }
         }
+
+        /// <summary>After a cancelled contract the customer buys from the rest of the industry and asks for bids again soon.</summary>
+        static void Retender(GameState s, CustomerDef cust, CustomerState cs, int month)
+        {
+            cs.SupplierId = Others;
+            cs.ContractId = null;
+            if (!s.Rfqs.Any(r => r.CustomerId == cs.Id)) cs.NextRfqMonth = Math.Min(cs.NextRfqMonth, month + 2);
+        }
+
+        // ------------------------------------------------------------------ capacity
+
+        /// <summary>
+        /// Chips of a design your fabs on its node could make a month at full capacity and today's yields (before any
+        /// is promised to anyone).
+        /// </summary>
+        public static double EstimatedOutput(GameData d, GameState s, ChipDesign c)
+        {
+            if (c?.Stats == null) return 0;
+            var n = d.Node(c.NodeId);
+            var pkg = d.Package(c.PackageId);
+            if (n == null) return 0;
+            int dpw = YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(c.DieAreaMm2));
+            double total = 0;
+            foreach (var f in s.Fabs.Where(f => f.NodeId == c.NodeId && f.Stage != FabStage.Closed))
+            {
+                double d0 = f.Producing ? FabOps.D0(d, f) : LearningCurve.D0(n, FabOps.StartingLearning(d, s, f.NodeId));
+                total += f.Capacity * dpw * YieldModel.Yield(d0, c.DieAreaMm2) * (pkg?.Yield ?? 1);
+            }
+            return total;
+        }
+
+        /// <summary>Chips a month you've already promised customers from a design (active and upcoming contracts).</summary>
+        public static double Committed(GameState s, string designId, int fromMonth) =>
+            s.Contracts.Where(k => k.SupplierId == Player && k.DesignId == designId && k.Status == ContractStatus.Active && k.EndMonth >= fromMonth)
+                       .Sum(k => k.MaxMonthly > 0 ? k.MaxMonthly : k.LastMonthOrdered);
 
         public static void AdjustRep(GameState s, double delta) => s.Rep = Math.Clamp(s.Rep + delta, -1, 1);
 

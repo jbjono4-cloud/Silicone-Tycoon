@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -388,6 +389,64 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Contains(Advisor.Alerts(D, s), a => a.Text.Contains("sells out"));
             Market.SetListing(s, c.Id, "Standard", going);
             Assert.DoesNotContain(Advisor.Alerts(D, s), a => a.Text.Contains("sells out"));
+        }
+
+        [Fact]
+        public void RivalsThatCantDeliverLoseTheContract()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var r = s.Rivals[0];
+            var k = new Contract
+            {
+                Id = "k9", CustomerId = "brightline", SupplierId = r.Id, DesignId = "x", Bin = "Standard",
+                BasePrice = 5, StartMonth = s.MonthIndex, EndMonth = s.MonthIndex + 24,
+            };
+            s.Contracts.Add(k);
+            var cs = Market.CustomerOf(s, "brightline");
+            cs.SupplierId = r.Id;
+            cs.ContractId = k.Id;
+            cs.NextRfqMonth = s.MonthIndex + 30;
+            r.Capacity = 0;   // a fab problem: nothing to ship
+            for (int i = 0; i < 4; i++)
+            {
+                r.Capacity = 0;
+                Simulation.AdvanceMonths(D, s, 1);
+            }
+            Assert.Equal(ContractStatus.Cancelled, k.Status);
+            Assert.NotEqual(r.Id, cs.SupplierId);
+            Assert.True(cs.NextRfqMonth <= s.MonthIndex + 2 || s.Rfqs.Any(x => x.CustomerId == "brightline"));
+        }
+
+        [Fact]
+        public void RivalsOnlyBidForWhatTheyCanMake()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var rfq = new Rfq
+            {
+                Id = "r1", CustomerId = "brightline", SegmentId = "embedded", OpenMonth = s.MonthIndex, CloseMonth = s.MonthIndex + 2,
+                StartMonth = s.MonthIndex + 8, LengthMonths = 24, MinMetric = 0.01, MaxPowerW = 5, MaxPrice = 1000, ExpectedPrice = 10, EstimatedUnits = 1_000_000,
+            };
+            s.Rfqs.Add(rfq);
+            Rivals.BidOnOpenRfqs(D, s);
+            foreach (var b in rfq.Bids)
+            {
+                var r = Rivals.Get(s, b.BidderId);
+                Assert.True(b.MaxUnits > 0 && b.MaxUnits <= r.Capacity * Rivals.BidHeadroom + 1);
+            }
+        }
+
+        [Fact]
+        public void OutputEstimatesFollowYourFabs()
+        {
+            var s = TestData.NewGame(year: 1975);
+            var c = ReleasedChip(s, "n6um", Metric.Control);
+            Assert.Equal(0, Market.EstimatedOutput(D, s, c));
+            Assert.Null(FabOps.Build(D, s, null, "n6um", "us_ca", 1000));
+            double planned = Market.EstimatedOutput(D, s, c);
+            Assert.True(planned > 1000);
+            var k = AddContract(s, c, "Standard");
+            k.MaxMonthly = 1234;
+            Assert.Equal(1234, Market.Committed(s, c.Id, s.MonthIndex), 6);
         }
     }
 }

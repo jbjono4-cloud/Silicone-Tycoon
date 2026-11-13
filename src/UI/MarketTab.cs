@@ -154,7 +154,10 @@ namespace SiliconeTycoon.UI
             if (!drafts.TryGetValue(r.Id, out var d))
             {
                 var best = chips.OrderByDescending(c => Market.Perf(c, Binning.BinsFor(c)[0].Name, seg.Metric)).First();
-                d = new BidDraft { ChipId = best.Id, Price = Math.Round(r.ExpectedPrice * 0.95, 2), Units = 0 };
+                double spareNow = Market.EstimatedOutput(D, S, best) - Market.Committed(S, best.Id, r.StartMonth);
+                double volumeNow = r.EstimatedUnits * Market.ContractUpside;
+                double units = spareNow >= volumeNow ? 0 : Math.Max(0, Math.Floor(spareNow / 500) * 500);
+                d = new BidDraft { ChipId = best.Id, Price = Math.Round(r.ExpectedPrice * 0.95, 2), Units = units };
                 drafts[r.Id] = d;
             }
             if (!chips.Any(c => c.Id == d.ChipId)) d.ChipId = chips[0].Id;
@@ -170,6 +173,25 @@ namespace SiliconeTycoon.UI
             row.AddChild(Ui.Btn(mine == null ? "Submit bid" : "Change bid", () => Act(Market.SubmitBid(D, S, r.Id, d.ChipId, bin, d.Price, d.Units), "Bid submitted.")));
             if (mine != null) row.AddChild(Ui.Btn("Withdraw", () => Act(Market.WithdrawBid(S, r.Id))));
             box.AddChild(row);
+
+            // can you make that many?
+            double output = Market.EstimatedOutput(D, S, chip);
+            double promised = Market.Committed(S, chip.Id, r.StartMonth);
+            double spare = Math.Max(0, output - promised);
+            double offered = d.Units > 0 ? d.Units : r.EstimatedUnits * Market.ContractUpside;
+            string capText = output <= 0
+                ? $"You have no {D.Node(chip.NodeId).Name} fab to make the {chip.Name} in."
+                : $"Your {D.Node(chip.NodeId).Name} fabs could make about {Ui.Units(output)} {chip.Name} chips a month flat out" +
+                  (promised > 0 ? $", {Ui.Units(promised)} already promised" : "") + $" · this bid offers up to {Ui.Units(offered)} a month";
+            box.AddChild(Ui.L(capText, 12, offered > spare * 1.05 ? Ui.Warn : Ui.Muted));
+            if (offered > spare * 1.05)
+            {
+                var fix = Ui.H(8);
+                fix.AddChild(Ui.L("Short deliveries cost penalties, reputation and, after three bad months, the contract.", 12, Ui.Warn));
+                if (spare >= r.EstimatedUnits * Market.MinBidShare)
+                    fix.AddChild(Ui.Btn($"Offer {Ui.Units(Math.Floor(spare / 500) * 500)} a month", () => { d.Units = Math.Floor(spare / 500) * 500; Refresh(); }));
+                box.AddChild(fix);
+            }
 
             // live check of the draft
             string problem = Market.CheckBid(D, r, chip, bin, d.Price);
