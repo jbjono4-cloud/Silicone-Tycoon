@@ -28,6 +28,9 @@ namespace SiliconeTycoon.UI
         // floorplan editor
         bool editing;
         PanelContainer editorCard;
+        VBoxContainer sideBox, tuneHolder, formBody;
+        HBoxContainer tuneRow;
+        bool overlayOpen;
         VBoxContainer editTools, binBox;
         FloorplanCanvas canvas;
         int addBlockIdx;
@@ -69,6 +72,8 @@ namespace SiliconeTycoon.UI
             nodePick = Ui.Options(new string[0], 0, i => { formNode = formNodes[i].Id; NodeChanged(); });
             b.AddChild(nodePick);
             var tune = Ui.H(10);
+            tuneRow = tune;
+            formBody = b;
             tune.AddChild(Ui.L("Rated clock", 13, Ui.Muted));
             clockSpin = Ui.Spin(0, 100, 0.05, 0, v => Reanalyze(), "", " MHz");
             clockSpin.TooltipText = "0 = 90% of what a typical die reaches";
@@ -282,11 +287,14 @@ namespace SiliconeTycoon.UI
         {
             if (planBox == null) return;
             Ui.Clear(planBox);
+            if (sideBox != null) Ui.Clear(sideBox);
+            var box = overlayOpen ? sideBox : planBox;
+            if (overlayOpen) planBox.AddChild(Ui.L("Editing the floorplan...", 13, Ui.Muted));
             if (draft == null)
             {
-                planBox.AddChild(Ui.Wrap("The design house can't make a chip for that market on that node with this year's blocks and packages." +
+                box.AddChild(Ui.Wrap("The design house can't make a chip for that market on that node with this year's blocks and packages." +
                                          (planWhy != null ? $" The full-strength design fails because: {planWhy}" : ""), 13, Ui.Bad));
-                planBox.AddChild(Ui.Btn("Lay out a blank die by hand", StartBlank));
+                box.AddChild(Ui.Btn("Lay out a blank die by hand", StartBlank));
                 return;
             }
             draft.TargetClockMHz = clockSpin.Value;
@@ -300,76 +308,134 @@ namespace SiliconeTycoon.UI
                 var edit = Ui.H(8);
                 edit.AddChild(Ui.Btn("Edit the floorplan", () => { editing = true; RefreshEditor(); }, "Move, reshape, add and remove blocks yourself"));
                 if (!draft.UseDesignHouse) edit.AddChild(Ui.Btn("Back to the design house plan", Replan));
-                planBox.AddChild(edit);
+                box.AddChild(edit);
             }
-            planBox.AddChild(Ui.L(draft.UseDesignHouse ? "Layout: design house (fee, 5% slower, your team does 80% of the work)" : "Layout: by hand (no fee, full speed, your team does all the work)", 12, Ui.Muted));
+            box.AddChild(Ui.L(draft.UseDesignHouse ? "Layout: design house (fee, 5% slower, your team does 80% of the work)" : "Layout: by hand (no fee, full speed, your team does all the work)", 12, Ui.Muted));
             var seg = D.Segment(formSeg);
             var team = S.DesignTeams.FirstOrDefault();
 
-            planBox.AddChild(Ui.Rule());
-            planBox.AddChild(Ui.L(string.Join(" + ", draft.Blocks.Select(p => D.Block(p.BlockId).Name)), 13, Ui.Fg));
-            planBox.AddChild(Ui.Row("Package", D.Package(draft.PackageId)?.Name ?? "—"));
-            planBox.AddChild(Ui.Row("Transistors", $"{st.Transistors:N0}"));
-            planBox.AddChild(Ui.Row("Features", st.Features.Count == 0 ? "none" : Features.List(st.Features)));
-            planBox.AddChild(Ui.Row("Pins", $"{st.PinsNeeded} needed · {st.PadsSupplied} pads · {st.PackagePins}-pin package"));
-            if (st.RamBytes > 0 || st.RomBytes > 0) planBox.AddChild(Ui.Row("Memory", $"{st.RamBytes:N0} B RAM · {st.RomBytes:N0} B ROM"));
-            planBox.AddChild(Ui.Row("Die", $"{draft.DieW:0.00} × {draft.DieH:0.00} mm = {st.DieAreaMm2:0.0} mm² ({st.Utilisation:P0} used)"));
-            planBox.AddChild(Ui.Row("Clock", $"{st.ClockMHz:0.00} MHz rated, {st.MaxClockMHz:0.00} typical"));
-            planBox.AddChild(Ui.Row("Power", $"{st.PowerW:0.00} W (market limit {seg.MaxPowerW:0.#} W)", st.PowerW > seg.MaxPowerW ? Ui.Bad : null));
+            box.AddChild(Ui.Rule());
+            box.AddChild(Ui.L(string.Join(" + ", draft.Blocks.Select(p => D.Block(p.BlockId).Name)), 13, Ui.Fg));
+            box.AddChild(Ui.Row("Package", D.Package(draft.PackageId)?.Name ?? "—"));
+            box.AddChild(Ui.Row("Transistors", $"{st.Transistors:N0}"));
+            box.AddChild(Ui.Row("Features", st.Features.Count == 0 ? "none" : Features.List(st.Features)));
+            box.AddChild(Ui.Row("Pins", $"{st.PinsNeeded} needed · {st.PadsSupplied} pads · {st.PackagePins}-pin package"));
+            if (st.RamBytes > 0 || st.RomBytes > 0) box.AddChild(Ui.Row("Memory", $"{st.RamBytes:N0} B RAM · {st.RomBytes:N0} B ROM"));
+            box.AddChild(Ui.Row("Die", $"{draft.DieW:0.00} × {draft.DieH:0.00} mm = {st.DieAreaMm2:0.0} mm² ({st.Utilisation:P0} used)"));
+            box.AddChild(Ui.Row("Clock", $"{st.ClockMHz:0.00} MHz rated, {st.MaxClockMHz:0.00} typical"));
+            box.AddChild(Ui.Row("Power", $"{st.PowerW:0.00} W (market limit {seg.MaxPowerW:0.#} W)", st.PowerW > seg.MaxPowerW ? Ui.Bad : null));
             if (!double.IsInfinity(st.HeatLimit))
-                planBox.AddChild(Ui.Row("Hottest spot", $"{st.PeakHeat:0.000} of {st.HeatLimit:0.00} W/mm² (heat allows {Math.Min(st.ThermalClockMHz, 999):0.00} MHz)", st.PeakHeat > st.HeatLimit ? Ui.Bad : st.PeakHeat > st.HeatLimit * 0.85 ? Ui.Warn : null));
-            if (st.CongestionLoss > 0) planBox.AddChild(Ui.Row("Routing congestion", $"−{st.CongestionLoss:P0} clock at {st.Utilisation:P0} full", Ui.Warn));
-            if (st.LongestWire != null && st.LongestWireMm > 0.05) planBox.AddChild(Ui.Row("Slowest wire", $"{st.LongestWire}: {st.LongestWireMm:0.00} mm weighted"));
+                box.AddChild(Ui.Row("Hottest spot", $"{st.PeakHeat:0.000} of {st.HeatLimit:0.00} W/mm² (heat allows {Math.Min(st.ThermalClockMHz, 999):0.00} MHz)", st.PeakHeat > st.HeatLimit ? Ui.Bad : st.PeakHeat > st.HeatLimit * 0.85 ? Ui.Warn : null));
+            if (st.CongestionLoss > 0) box.AddChild(Ui.Row("Routing congestion", $"−{st.CongestionLoss:P0} clock at {st.Utilisation:P0} full", Ui.Warn));
+            if (st.LongestWire != null && st.LongestWireMm > 0.05) box.AddChild(Ui.Row("Slowest wire", $"{st.LongestWire}: {st.LongestWireMm:0.00} mm weighted"));
             var wantsNow = seg.WantsAt(S.YearF).ToList();
             var lacking = wantsNow.Where(w => !st.Features.Contains(w.Feature)).ToList();
             if (lacking.Count > 0)
-                planBox.AddChild(Ui.Wrap($"Buyers mark it down for lacking {string.Join(", ", lacking.Select(w => $"{Features.Name(w.Feature)} (−{w.Weight:P0})"))}." +
+                box.AddChild(Ui.Wrap($"Buyers mark it down for lacking {string.Join(", ", lacking.Select(w => $"{Features.Name(w.Feature)} (−{w.Weight:P0})"))}." +
                                          (seg.RequiredAt(S.YearF).Any(f => !st.Features.Contains(f)) ? " Distributors won't stock it without " + Features.List(seg.RequiredAt(S.YearF).Where(f => !st.Features.Contains(f))) + "." : ""), 12, Ui.Warn));
             var briefRfq = BriefRfq;
             if (briefRfq != null)
             {
                 var gaps = Specs.Check(D, ChipSpec.ForRfq(D, briefRfq), draft, Binning.BinsFor(draft)[0].Name);
-                planBox.AddChild(gaps.Count == 0
+                box.AddChild(gaps.Count == 0
                     ? Ui.Wrap($"Meets {D.Customer(briefRfq.CustomerId)?.Name}'s request.", 12, Ui.Ok)
                     : Ui.Wrap($"Doesn't meet {D.Customer(briefRfq.CustomerId)?.Name}'s request: the customer {string.Join("; ", gaps)}.", 12, Ui.Bad));
             }
             double perf = Market.MetricOf(st, seg.Metric);
             double need = seg.NeedAt(S.YearF);
-            planBox.AddChild(Ui.Row($"{seg.Metric}", $"{perf:0.00} (competitive today: {need:0.00}, next year: {seg.NeedAt(S.YearF + 1):0.00})", perf < need * Market.OpenMarketMinShare ? Ui.Bad : perf < need ? Ui.Warn : Ui.Ok));
-            planBox.AddChild(Ui.Row("Dies per wafer", $"{st.DiesPerWafer:N0} at about {st.YieldEstimate:P0} yield"));
-            planBox.AddChild(Ui.Row("Cost per good chip", Format.Money(st.CostPerGoodDie)));
-            planBox.AddChild(Ui.Row("Buyers paying today", Format.Money(Market.MarketPrice(S, seg, S.YearF))));
-            planBox.AddChild(Ui.Rule());
+            box.AddChild(Ui.Row($"{seg.Metric}", $"{perf:0.00} (competitive today: {need:0.00}, next year: {seg.NeedAt(S.YearF + 1):0.00})", perf < need * Market.OpenMarketMinShare ? Ui.Bad : perf < need ? Ui.Warn : Ui.Ok));
+            box.AddChild(Ui.Row("Dies per wafer", $"{st.DiesPerWafer:N0} at about {st.YieldEstimate:P0} yield"));
+            box.AddChild(Ui.Row("Cost per good chip", Format.Money(st.CostPerGoodDie)));
+            box.AddChild(Ui.Row("Buyers paying today", Format.Money(Market.MarketPrice(S, seg, S.YearF))));
+            box.AddChild(Ui.Rule());
             int weeks = team == null || team.Engineers == 0 ? 0 : (int)Math.Ceiling(st.EngineerMonths / team.Engineers * Calendar.WeeksPerMonth);
-            planBox.AddChild(Ui.Row("Design effort", $"{st.EngineerMonths:0} engineer-months ≈ {weeks / Calendar.WeeksPerMonth} months with {team?.Engineers ?? 0} engineers"));
-            planBox.AddChild(Ui.Row("Expected bugs at first silicon", $"{DesignOps.ExpectedBugs(draft, st):0.0}"));
-            planBox.AddChild(Ui.Row("Masks at tape-out", Format.Money(st.MaskCost)));
-            planBox.AddChild(Ui.Row("Design house fee (now)", Format.Money(st.DesignHouseFee)));
-            foreach (var note in st.Notes) planBox.AddChild(Ui.Wrap(note.Text, 12, Ui.NoteSev(note.Severity)));
+            box.AddChild(Ui.Row("Design effort", $"{st.EngineerMonths:0} engineer-months ≈ {weeks / Calendar.WeeksPerMonth} months with {team?.Engineers ?? 0} engineers"));
+            box.AddChild(Ui.Row("Expected bugs at first silicon", $"{DesignOps.ExpectedBugs(draft, st):0.0}"));
+            box.AddChild(Ui.Row("Masks at tape-out", Format.Money(st.MaskCost)));
+            box.AddChild(Ui.Row("Design house fee (now)", Format.Money(st.DesignHouseFee)));
+            foreach (var note in st.Notes) box.AddChild(Ui.Wrap(note.Text, 12, Ui.NoteSev(note.Severity)));
             if (!S.Fabs.Any(f => f.NodeId == draft.NodeId && f.Stage != FabStage.Closed))
-                planBox.AddChild(Ui.Wrap($"You have no {D.Node(draft.NodeId).Name} fab to make it in yet.", 12, Ui.Warn));
+                box.AddChild(Ui.Wrap($"You have no {D.Node(draft.NodeId).Name} fab to make it in yet.", 12, Ui.Warn));
         }
 
         // ---------------------------------------------------------------- floorplan editor
 
+        /// <summary>
+        /// The floorplan editor opens over the whole window: the die large on the left, with the tools above it and the
+        /// bins below, and the chip's numbers, notes and tuning on the right.
+        /// </summary>
         void BuildEditor(VBoxContainer parent)
         {
-            var (card, b) = Ui.CardV("Floorplan editor");
-            editorCard = card;
-            card.Visible = false;
+            var overlay = new PanelContainer { Visible = false, ZIndex = 15 };
+            overlay.SetAnchorsPreset(LayoutPreset.FullRect);
+            var bg = new StyleBoxFlat { BgColor = Ui.Bg };
+            bg.SetContentMarginAll(14);
+            overlay.AddThemeStyleboxOverride("panel", bg);
+            editorCard = overlay;
+
+            var split = Ui.H(14);
+            overlay.AddChild(split);
+
+            var leftCol = Ui.V(8);
+            leftCol.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            leftCol.SizeFlagsStretchRatio = 2.3f;
             editTools = Ui.V(6);
-            b.AddChild(editTools);
-            canvas = new FloorplanCanvas { Data = D, Editable = true, CustomMinimumSize = new Vector2(600, 440) };
+            leftCol.AddChild(editTools);
+            canvas = new FloorplanCanvas { Data = D, Editable = true, CustomMinimumSize = new Vector2(600, 420) };
             canvas.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            canvas.SizeFlagsVertical = SizeFlags.ExpandFill;
             canvas.Changed = () => Edited();
             canvas.SelectionChanged = RefreshEditor;
-            b.AddChild(canvas);
-            b.AddChild(Ui.Wrap("Drag blocks to move them: they snap to the die edge and to each other. Right-click turns a block; scroll over the selected block to change its shape (same area). " +
-                               "I/O rings must touch the die edge. Keep cores next to the memory, ROM and graphics they talk to: every mm of wire costs clock speed (dashed lines). " +
-                               "Empty silicon is paid for on every wafer but defects that land there do no harm. A smaller die fits more per wafer and yields better.", 12, Ui.Muted));
+            var canvasCard = Ui.Card(canvas);
+            canvasCard.SizeFlagsVertical = SizeFlags.ExpandFill;
+            leftCol.AddChild(canvasCard);
+            leftCol.AddChild(Ui.Wrap("Drag blocks to move them: they snap to the die edge and to each other. Right-click turns a block; scroll over the selected block to change its shape (same area). " +
+                                     "I/O rings must touch the die edge. Keep cores next to the memory, ROM and graphics they talk to: every mm of wire costs clock speed (dashed lines). " +
+                                     "Empty silicon is paid for on every wafer but defects that land there do no harm. A smaller die fits more per wafer and yields better.", 12, Ui.Muted));
             binBox = Ui.V(4);
-            b.AddChild(binBox);
-            parent.AddChild(card);
+            var bins = Ui.Scroll(binBox);
+            bins.SizeFlagsVertical = SizeFlags.Fill;
+            bins.CustomMinimumSize = new Vector2(0, 150);
+            leftCol.AddChild(bins);
+            split.AddChild(leftCol);
+
+            var rightCol = Ui.V(8);
+            tuneHolder = Ui.V(6);
+            rightCol.AddChild(tuneHolder);
+            sideBox = Ui.V(3);
+            rightCol.AddChild(sideBox);
+            var (sideCard, sb) = Ui.CardV("The chip");
+            sb.AddChild(rightCol);
+            var sideScroll = Ui.Scroll(sideCard);
+            sideScroll.SizeFlagsStretchRatio = 1f;
+            split.AddChild(sideScroll);
+
+            main.AddChild(overlay);
+        }
+
+        public override void _ExitTree()
+        {
+            if (editorCard != null && IsInstanceValid(editorCard)) editorCard.QueueFree();
+            editorCard = null;
+        }
+
+        /// <summary>Opens or closes the editor window, moving the clock and effort settings into it while it's open.</summary>
+        void SetOverlay(bool open)
+        {
+            if (open == overlayOpen || editorCard == null) return;
+            overlayOpen = open;
+            editorCard.Visible = open;
+            tuneRow.GetParent()?.RemoveChild(tuneRow);
+            if (open)
+            {
+                tuneHolder.AddChild(tuneRow);
+                main.PauseGame();
+            }
+            else
+            {
+                formBody.AddChild(tuneRow);
+                formBody.MoveChild(tuneRow, planBox.GetIndex());
+            }
         }
 
         void StartBlank()
@@ -409,8 +475,11 @@ namespace SiliconeTycoon.UI
         {
             if (editorCard == null) return;
             bool show = editing && draft != null;
-            editorCard.Visible = show;
-            list.Visible = !show;
+            if (show != overlayOpen)
+            {
+                SetOverlay(show);
+                Reanalyze();
+            }
             if (!show) return;
             canvas.Data = D;
             canvas.Chip = draft;
@@ -421,9 +490,11 @@ namespace SiliconeTycoon.UI
             Ui.Clear(editTools);
             var n = D.Node(draft.NodeId);
             var head = Ui.H(10);
-            head.AddChild(Ui.L($"{draft.Name} on {n.Name}", 15));
+            head.AddChild(Ui.Title($"Floorplan: {draft.Name}", 18));
+            head.AddChild(Ui.L($"{n.Name} · {Calendar.DateLabel(S.Tick)} · {Format.Money(S.Cash)} in the bank · the game is paused while you edit", 13, Ui.Muted));
             head.AddChild(Ui.Spacer());
-            head.AddChild(Ui.Primary("Done editing", () => { editing = false; RefreshEditor(); Reanalyze(); }));
+            head.AddChild(Ui.Btn("Close", () => { editing = false; RefreshEditor(); Reanalyze(); }, "Back to the Design tab; the draft keeps your layout"));
+            head.AddChild(Ui.Primary("Start the design", () => { StartDraft(); RefreshEditor(); }));
             editTools.AddChild(head);
 
             // add a block

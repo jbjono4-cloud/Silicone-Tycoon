@@ -25,7 +25,7 @@ namespace SiliconeTycoon.UI
         /// <summary>The selection changed.</summary>
         public Action SelectionChanged;
 
-        const float Margin = 14;
+        const float Margin = 26;
         const double SnapPx = 8;
         const double Grid = 0.05;
         float scale = 40;
@@ -94,7 +94,21 @@ namespace SiliconeTycoon.UI
             for (int i = 1; i < Chip.DieW; i++) DrawLine(ToScreen(i, 0), ToScreen(i, Chip.DieH), new Color(1, 1, 1, 0.05f));
             for (int j = 1; j < Chip.DieH; j++) DrawLine(ToScreen(0, j), ToScreen(Chip.DieW, j), new Color(1, 1, 1, 0.05f));
             DrawRect(die, Ui.Accent, false, 2);
-            DrawString(font, die.Position + new Vector2(0, -3), $"{Chip.DieW:0.00} × {Chip.DieH:0.00} mm", HorizontalAlignment.Left, -1, 11, Ui.Muted);
+            DrawString(font, die.Position + new Vector2(0, -6), $"{Chip.DieW:0.00} × {Chip.DieH:0.00} mm = {Chip.DieW * Chip.DieH:0.0} mm²", HorizontalAlignment.Left, -1, 11, Ui.Muted);
+            // mm rulers along the bottom and left of the die, spaced so labels don't crowd
+            double step = new[] { 0.5, 1, 2, 5, 10 }.FirstOrDefault(v => v * scale >= 34, 10);
+            for (double x = 0; x <= Chip.DieW + 1e-6; x += step)
+            {
+                var p = ToScreen(x, Chip.DieH);
+                DrawLine(p, p + new Vector2(0, 4), Ui.Muted, 1);
+                DrawString(font, p + new Vector2(-6, 15), $"{x:0.#}", HorizontalAlignment.Left, -1, 10, Ui.Muted);
+            }
+            for (double y = step; y <= Chip.DieH + 1e-6; y += step)
+            {
+                var p = ToScreen(0, y);
+                DrawLine(p, p - new Vector2(4, 0), Ui.Muted, 1);
+                DrawString(font, p + new Vector2(-24, 4), $"{y:0.#}", HorizontalAlignment.Left, -1, 10, Ui.Muted);
+            }
 
             var defs = Chip.Blocks.Select(p => (p, b: Data.Block(p.BlockId))).Where(x => x.b != null).ToList();
 

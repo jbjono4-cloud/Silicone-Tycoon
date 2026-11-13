@@ -215,6 +215,9 @@ namespace SiliconeTycoon.UI
             Toast("Paused. Start a chip in Design, a fab in Fabs, and the next node in Research, then press Space.");
         }
 
+        /// <summary>Pauses the clock (for screens that need the player's full attention).</summary>
+        public void PauseGame() => SetSpeed(0);
+
         void SetSpeed(int sp)
         {
             if (sp > 0) lastSpeed = sp;
