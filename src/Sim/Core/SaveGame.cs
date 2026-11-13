@@ -6,7 +6,7 @@ namespace SiliconeTycoon.Sim
     /// <summary>Saves are the whole <see cref="GameState"/> as JSON, versioned so old saves can be migrated.</summary>
     public static class SaveGame
     {
-        public const int Version = 3;
+        public const int Version = 4;
 
         public static string Serialize(GameState s) => JsonSerializer.Serialize(s, SimJson.Save);
 
@@ -39,6 +39,18 @@ namespace SiliconeTycoon.Sim
                 // rivals used to produce on every node they had researched
                 foreach (var r in s.Rivals)
                     if (r.ProductionNodes.Count == 0) r.ProductionNodes = new System.Collections.Generic.List<string>(r.NodesReady);
+            }
+            if (s.SaveVersion < 4)
+            {
+                // fabs used to make one product
+                foreach (var f in s.Fabs)
+                    if (f.Allocations.Count == 0 && f.LegacyPlannedStarts > 0 && f.Stage != FabStage.Closed)
+                        f.Allocations.Add(new FabAllocation { DesignId = f.LegacyDesignId, Starts = f.LegacyPlannedStarts });
+            }
+            foreach (var f in s.Fabs)
+            {
+                f.LegacyDesignId = null;
+                f.LegacyPlannedStarts = 0;
             }
             foreach (var f in s.Fabs)
                 if (f.Producing && f.Learning > FabOps.Experience(s, f.NodeId)) s.NodeExperience[f.NodeId] = f.Learning;

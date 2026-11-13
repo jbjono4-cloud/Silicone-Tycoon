@@ -150,7 +150,7 @@ namespace SiliconeTycoon.UI
                     break;
                 case DesignStage.Released:
                     double stock = S.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.Units);
-                    int fabs = S.Fabs.Count(f => f.DesignId == c.Id && f.Producing);
+                    int fabs = S.Fabs.Count(f => f.Makes(c.Id) && f.Producing);
                     b.AddChild(Ui.L($"Released {Calendar.DateLabel(c.ReleasedTick)}{(c.FoundBugs > 0 ? $" with {c.FoundBugs} errata" : "")} · {Ui.Units(stock)} in stock · made in {fabs} fab{(fabs == 1 ? "" : "s")}", 13, Ui.Muted));
                     if (fabs == 0) b.AddChild(Ui.L($"No fab is making it. Assign it to a {n.Name} fab on the Fabs tab.", 13, Ui.Warn));
                     break;

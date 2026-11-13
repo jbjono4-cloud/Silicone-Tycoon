@@ -31,6 +31,13 @@ namespace SiliconeTycoon.Sim
         public bool Delivered;
     }
 
+    /// <summary>Wafer starts a month a fab gives one product. DesignId null = test wafers (learning only).</summary>
+    public class FabAllocation
+    {
+        public string DesignId;
+        public int Starts;
+    }
+
     public class Fab
     {
         public string Id;
@@ -68,12 +75,26 @@ namespace SiliconeTycoon.Sim
 
         /// <summary>Monthly process-engineering spend, in current dollars.</summary>
         public double EngineeringBudget;
-        /// <summary>Wafer starts per month the player wants.</summary>
-        public int PlannedStarts;
-        /// <summary>Die size of what the fab is making. Test wafers use a nominal 10 mm² die.</summary>
-        public double DieAreaMm2 = 10;
-        /// <summary>Released design the fab makes; null runs test wafers that teach the process but aren't sold.</summary>
-        public string DesignId;
+        /// <summary>What the fab makes: wafer starts a month per product. A fab can run several chips at once.</summary>
+        public List<FabAllocation> Allocations = new List<FabAllocation>();
+        /// <summary>Saves before version 4 only (one product per fab).</summary>
+        [JsonPropertyName("DesignId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public string LegacyDesignId;
+        [JsonPropertyName("PlannedStarts"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public int LegacyPlannedStarts;
+
+        /// <summary>Total wafer starts a month planned across all products. Setting it scales every product's share.</summary>
+        [JsonIgnore]
+        public int PlannedStarts
+        {
+            get => Allocations.Sum(a => a.Starts);
+            set => FabOps.SetTotalStarts(this, value);
+        }
+
+        /// <summary>The main chip the fab makes (most wafer starts), or null if it only runs test wafers.</summary>
+        [JsonIgnore]
+        public string DesignId => Allocations.Where(a => a.DesignId != null && a.Starts > 0).OrderByDescending(a => a.Starts).FirstOrDefault()?.DesignId;
+
+        public int StartsFor(string designId) => Allocations.Where(a => a.DesignId == designId).Sum(a => a.Starts);
+        public bool Makes(string designId) => StartsFor(designId) > 0;
 
         public int StartsThisMonth;
         public int LastMonthStarts;
@@ -207,29 +228,80 @@ namespace SiliconeTycoon.Sim
             return (int)Math.Floor(f.Capacity * share);
         }
 
-        public static string SetPlannedStarts(Fab f, int starts)
-        {
-            if (starts < 0) return "Wafer starts can't be negative.";
-            f.PlannedStarts = Math.Min(starts, f.Capacity);
-            return null;
-        }
+        /// <summary>Die area wafers for a product are cut into. Test wafers use a nominal 10 mm² die.</summary>
+        public static double DieArea(GameState s, string designId) => s.Design(designId)?.DieAreaMm2 ?? 10;
 
-        /// <summary>Points the fab at a released design on its node (or null for test wafers). Lots already started finish as they were.</summary>
-        public static string AssignDesign(GameData d, GameState s, Fab f, string designId)
+        static string CheckProduct(GameData d, GameState s, Fab f, string designId)
         {
-            if (designId == null)
-            {
-                f.DesignId = null;
-                f.DieAreaMm2 = 10;
-                return null;
-            }
+            if (designId == null) return null;
             var c = s.Design(designId);
             if (c == null) return "Unknown chip.";
             if (c.Stage != DesignStage.Released) return $"Release the {c.Name} before putting it into production.";
             if (c.NodeId != f.NodeId) return $"The {c.Name} is laid out for {d.Node(c.NodeId).Name}, but {f.Name} runs {d.Node(f.NodeId).Name}.";
-            f.DesignId = c.Id;
-            f.DieAreaMm2 = c.DieAreaMm2;
-            s.Log($"{f.Name} switches production to the {c.Name}.", 0);
+            return null;
+        }
+
+        /// <summary>
+        /// Sets the wafer starts a month for one product (null = test wafers). 0 stops making it. The fab's products together
+        /// can't plan more than its capacity; while ramping they share what's available.
+        /// </summary>
+        public static string SetAllocation(GameData d, GameState s, Fab f, string designId, int starts)
+        {
+            if (f.Stage == FabStage.Closed) return $"{f.Name} is closed.";
+            if (starts < 0) return "Wafer starts can't be negative.";
+            string err = CheckProduct(d, s, f, designId);
+            if (err != null && starts > 0) return err;
+            int others = f.Allocations.Where(a => a.DesignId != designId).Sum(a => a.Starts);
+            if (others + starts > f.Capacity) return $"{f.Name} can start {f.Capacity:N0} wafers a month; the other products already take {others:N0}.";
+            bool isNew = f.StartsFor(designId) == 0 && starts > 0;
+            f.Allocations.RemoveAll(a => a.DesignId == designId);
+            if (starts > 0) f.Allocations.Add(new FabAllocation { DesignId = designId, Starts = starts });
+            if (isNew && designId != null) s.Log($"{f.Name} starts making the {s.Design(designId).Name}.", 0);
+            return null;
+        }
+
+        /// <summary>Sets the fab's total wafer starts, scaling each product's share to fit (test wafers if it has none).</summary>
+        public static string SetPlannedStarts(Fab f, int starts)
+        {
+            if (starts < 0) return "Wafer starts can't be negative.";
+            SetTotalStarts(f, starts);
+            return null;
+        }
+
+        internal static void SetTotalStarts(Fab f, int total)
+        {
+            total = Math.Clamp(total, 0, Math.Max(0, f.Capacity));
+            int sum = f.Allocations.Sum(a => a.Starts);
+            if (f.Allocations.Count == 0)
+            {
+                if (total > 0) f.Allocations.Add(new FabAllocation { DesignId = null, Starts = total });
+                return;
+            }
+            if (sum <= 0)
+            {
+                f.Allocations[0].Starts = total;
+                for (int i = 1; i < f.Allocations.Count; i++) f.Allocations[i].Starts = 0;
+                return;
+            }
+            int assigned = 0;
+            for (int i = 0; i < f.Allocations.Count; i++)
+            {
+                var a = f.Allocations[i];
+                a.Starts = i == f.Allocations.Count - 1 ? total - assigned : (int)Math.Round(a.Starts * (double)total / sum);
+                a.Starts = Math.Max(0, a.Starts);
+                assigned += a.Starts;
+            }
+        }
+
+        /// <summary>Makes the fab run one product only (null = test wafers), keeping its total wafer starts. Lots already started finish as they were.</summary>
+        public static string AssignDesign(GameData d, GameState s, Fab f, string designId)
+        {
+            string err = CheckProduct(d, s, f, designId);
+            if (err != null) return err;
+            int total = f.PlannedStarts > 0 ? f.PlannedStarts : f.Capacity;
+            f.Allocations.Clear();
+            f.Allocations.Add(new FabAllocation { DesignId = designId, Starts = total });
+            if (designId != null) s.Log($"{f.Name} switches production to the {s.Design(designId).Name}.", 0);
             return null;
         }
 
@@ -281,8 +353,7 @@ namespace SiliconeTycoon.Sim
             f.MonthlyDepreciation = 0;
             f.Lots.RemoveAll(l => !l.Done);
             f.NodeId = nodeId;
-            f.DesignId = null;
-            f.DieAreaMm2 = 10;
+            f.Allocations.Clear();
             f.Stage = FabStage.Construction;
             f.Retooling = true;
             f.Retools++;
@@ -297,7 +368,7 @@ namespace SiliconeTycoon.Sim
             f.StartsThisMonth = 0;
             f.LastUtilisation = 0;
             f.EngineeringBudget = q.RecommendedEngineering;
-            f.PlannedStarts = f.Capacity;
+            f.Allocations.Add(new FabAllocation { DesignId = null, Starts = f.Capacity });
             s.Log($"{f.Name} shuts down to retool from {old.Name} to {n.Name}: {Format.Big(q.NetCapex)} over {q.BuildMonths} months. " +
                   $"{Format.Big(writeOff)} of old equipment is written off.", 1);
             return null;
@@ -386,8 +457,7 @@ namespace SiliconeTycoon.Sim
             f.ExpandPaid = 0;
             f.BookValue = 0;
             f.MonthlyDepreciation = 0;
-            f.PlannedStarts = 0;
-            f.DesignId = null;
+            f.Allocations.Clear();
             f.Lots.RemoveAll(l => !l.Done);
             s.Log($"{f.Name} closes. The equipment sells for {Format.Big(salvage)}; {Format.Big(value - salvage)} is written off.", 2);
             return null;
@@ -440,33 +510,44 @@ namespace SiliconeTycoon.Sim
             FinishLots(d, s, f);
         }
 
+        /// <summary>Wafer starts a month each product actually gets: its plan, scaled down if the fab can't run them all (while ramping).</summary>
+        public static List<(string designId, int starts)> EffectiveStarts(GameData d, Fab f)
+        {
+            int planned = f.PlannedStarts;
+            int available = AvailableCapacity(d, f);
+            double scale = planned > available && planned > 0 ? available / (double)planned : 1;
+            return f.Allocations.Where(a => a.Starts > 0).Select(a => (a.DesignId, (int)Math.Floor(a.Starts * scale))).ToList();
+        }
+
         static void StartWafers(GameData d, GameState s, Fab f, ProcessNodeDef n)
         {
-            int target = Math.Min(f.PlannedStarts, AvailableCapacity(d, f));
             int week = Calendar.WeekInMonth(s.Tick);
-            int wafers = target / Calendar.WeeksPerMonth + (week < target % Calendar.WeeksPerMonth ? 1 : 0);
-            if (wafers <= 0) return;
-
-            double area = YieldModel.WithScribe(f.DieAreaMm2);
-            int dpw = YieldModel.DiesPerWafer(n.WaferMm, area);
-            var lot = new WaferLot
+            foreach (var (designId, target) in EffectiveStarts(d, f))
             {
-                Id = s.NewId("lot"),
-                FabId = f.Id,
-                NodeId = f.NodeId,
-                DesignId = f.DesignId,
-                StartTick = s.Tick,
-                DoneTick = s.Tick + n.CycleWeeks,
-                Wafers = wafers,
-                DieAreaMm2 = f.DieAreaMm2,
-                D0 = D0(d, f),
-                DiesPerWafer = dpw,
-                GrossDies = dpw * wafers,
-            };
-            f.Lots.Add(lot);
-            f.StartsThisMonth += wafers;
-            f.CumulativeWafers += wafers;
-            s.Ledger.Book(Accounts.Materials, -wafers * WaferCost(d, s, f));
+                int wafers = target / Calendar.WeeksPerMonth + (week < target % Calendar.WeeksPerMonth ? 1 : 0);
+                if (wafers <= 0) continue;
+                // a product no longer released (cancelled) runs as test wafers
+                string id = s.Design(designId)?.Stage == DesignStage.Released ? designId : null;
+                double die = DieArea(s, id);
+                int dpw = YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(die));
+                f.Lots.Add(new WaferLot
+                {
+                    Id = s.NewId("lot"),
+                    FabId = f.Id,
+                    NodeId = f.NodeId,
+                    DesignId = id,
+                    StartTick = s.Tick,
+                    DoneTick = s.Tick + n.CycleWeeks,
+                    Wafers = wafers,
+                    DieAreaMm2 = die,
+                    D0 = D0(d, f),
+                    DiesPerWafer = dpw,
+                    GrossDies = dpw * wafers,
+                });
+                f.StartsThisMonth += wafers;
+                f.CumulativeWafers += wafers;
+                s.Ledger.Book(Accounts.Materials, -wafers * WaferCost(d, s, f));
+            }
         }
 
         static void FinishLots(GameData d, GameState s, Fab f)

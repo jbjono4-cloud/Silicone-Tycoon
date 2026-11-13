@@ -22,6 +22,7 @@ namespace SiliconeTycoon.UI
         // per-fab choices that survive refreshes
         readonly Dictionary<string, string> retoolChoice = new Dictionary<string, string>();
         readonly Dictionary<string, int> expandChoice = new Dictionary<string, int>();
+        readonly Dictionary<string, int> addChoice = new Dictionary<string, int>();
         string confirmClose;
 
         public FabsTab() { }
@@ -168,7 +169,6 @@ namespace SiliconeTycoon.UI
 
             int avail = FabOps.AvailableCapacity(D, f);
             double d0 = FabOps.D0(D, f);
-            var chip = S.Design(f.DesignId);
             var grid = new GridContainer { Columns = 4 };
             grid.AddThemeConstantOverride("h_separation", 18);
             void Cell(string k, string v, Color? c = null) { grid.AddChild(Ui.L(k, 13, Ui.Muted)); grid.AddChild(Ui.L(v, 13, c ?? Ui.Fg)); }
@@ -176,38 +176,12 @@ namespace SiliconeTycoon.UI
             Cell("Last month", $"{f.LastMonthStarts:N0} wafers ({f.LastUtilisation:P0})", f.LastUtilisation < 0.6 ? Ui.Warn : null);
             Cell("Defect density", $"{d0:0.00}/cm² (floor {n.D0Mature:0.0})");
             Cell("Learning", $"{f.Learning:0.0} months");
-            if (chip != null)
-            {
-                Cell("Chip", $"{chip.Name} ({chip.DieAreaMm2:0.0} mm²)");
-                Cell("Expected yield", $"{YieldModel.Yield(d0, chip.DieAreaMm2):P0}");
-                Cell("Dies per wafer", $"{YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(chip.DieAreaMm2)):N0}");
-                Cell("Good dies a month", Ui.Units(FabOps.AvailableCapacity(D, f) * YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(chip.DieAreaMm2)) * YieldModel.Yield(d0, chip.DieAreaMm2)));
-                double made = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.MadeLastMonth);
-                double sold = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.SoldLastMonth);
-                double stock = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.Units);
-                bool piling = stock >= 1000 && (sold <= 0 || stock > sold * Advisor.StockMonthsWarning);
-                Cell("Made / sold last month", $"{Ui.Units(made)} / {Ui.Units(sold)} (all fabs)", made > sold * 1.1 ? Ui.Warn : null);
-                Cell("In the warehouse", sold > 0 ? $"{Ui.Units(stock)} ({stock / sold:0.0} months)" : Ui.Units(stock), piling ? Ui.Warn : null);
-            }
             Cell("Running cost", $"{Format.Money(FabOps.RunningCost(D, S, f))}/mo");
             Cell("Wafer materials", $"{Format.Money(FabOps.WaferCost(D, S, f))}");
             Cell("Book value", Format.Big(f.BookValue));
             Cell("Depreciation", $"{Format.Money(Math.Min(f.BookValue, f.MonthlyDepreciation))}/mo");
             b.AddChild(grid);
-
-            // what it makes
-            var released = S.Designs.Where(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId).OrderByDescending(c => c.ReleasedTick).ToList();
-            var make = Ui.H(10);
-            make.AddChild(Ui.L("Making", 14, Ui.Muted));
-            var names = new[] { "Test wafers (learning only)" }.Concat(released.Select(c => c.Name)).ToArray();
-            int sel = chip == null ? 0 : 1 + released.FindIndex(c => c.Id == chip.Id);
-            make.AddChild(Ui.Options(names, sel, i => Act(FabOps.AssignDesign(D, S, f, i == 0 ? null : released[i - 1].Id))));
-            make.AddChild(Ui.L("Wafer starts", 14, Ui.Muted));
-            make.AddChild(Ui.Spin(0, f.Capacity, 25, f.PlannedStarts, v => FabOps.SetPlannedStarts(f, (int)v), "", " /mo"));
-            b.AddChild(make);
-            if (released.Count == 0)
-                b.AddChild(Ui.Wrap($"No released chip for {n.Name} yet. Test wafers still teach the process, so yields will be better when your first chip arrives.", 12, Ui.Muted));
-
+            b.AddChild(ProductsBox(f, n, d0));
             var eng = Ui.H(10);
             double rec = FabOps.RecommendedEngineering(S, f);
             eng.AddChild(Ui.L("Process engineering", 14, Ui.Muted));
@@ -223,7 +197,7 @@ namespace SiliconeTycoon.UI
                 foreach (var lot in lots)
                 {
                     string bins = string.Join(" · ", lot.Bins.Where(kv => kv.Value > 0).Select(kv => $"{kv.Key} {kv.Value:N0}"));
-                    b.AddChild(Ui.L($"{Calendar.DateLabel(lot.DoneTick)}: {lot.Wafers} wafers, {lot.GrossDies:N0} dies at D0 {lot.D0:0.0}, {lot.GoodDies / (double)Math.Max(1, lot.GrossDies):P0} good → {bins}", 12, Ui.Muted));
+                    b.AddChild(Ui.L($"{Calendar.DateLabel(lot.DoneTick)}: {S.Design(lot.DesignId)?.Name ?? "test"}, {lot.Wafers} wafers, {lot.GrossDies:N0} dies at D0 {lot.D0:0.0}, {lot.GoodDies / (double)Math.Max(1, lot.GrossDies):P0} good → {bins}", 12, Ui.Muted));
                 }
             }
 
@@ -231,6 +205,84 @@ namespace SiliconeTycoon.UI
             b.AddChild(RetoolRow(f));
             b.AddChild(CloseRow(f));
             return card;
+        }
+
+        /// <summary>The chips the fab makes, each with its own wafer starts, plus a row to add another.</summary>
+        Control ProductsBox(Fab f, ProcessNodeDef n, double d0)
+        {
+            var box = Ui.V(6);
+            int planned = f.PlannedStarts;
+            int avail = FabOps.AvailableCapacity(D, f);
+            var head = Ui.H(10);
+            head.AddChild(Ui.Heading("Products"));
+            head.AddChild(Ui.Spacer());
+            int free = f.Capacity - planned;
+            head.AddChild(Ui.L($"{planned:N0} of {f.Capacity:N0} wafer starts planned · {free:N0} free", 12, free > 0 ? Ui.Muted : Ui.Fg));
+            box.AddChild(head);
+            if (planned > avail && f.Stage == FabStage.Ramping)
+                box.AddChild(Ui.L($"Still ramping: only {avail:N0} starts a month are possible, so every product gets {avail / (double)planned:P0} of its plan.", 12, Ui.Warn));
+
+            var effective = FabOps.EffectiveStarts(D, f).ToDictionary(x => x.designId ?? "", x => x.starts);
+            var grid = new GridContainer { Columns = 7 };
+            grid.AddThemeConstantOverride("h_separation", 14);
+            foreach (var h in new[] { "Chip", "Wafer starts", "Die", "Yield", "Good dies/mo", "Made / sold / stock", "" })
+                grid.AddChild(Ui.L(h, 12, Ui.Muted));
+            foreach (var a in f.Allocations.OrderBy(a => a.DesignId == null).ThenByDescending(a => a.Starts).ToList())
+            {
+                var chip = S.Design(a.DesignId);
+                string id = a.DesignId;
+                double die = FabOps.DieArea(S, id);
+                int dpw = YieldModel.DiesPerWafer(n.WaferMm, YieldModel.WithScribe(die));
+                double y = YieldModel.Yield(d0, die);
+                int eff = effective.TryGetValue(id ?? "", out var e) ? e : 0;
+                grid.AddChild(Ui.L(chip?.Name ?? "Test wafers", 13, chip == null ? Ui.Muted : Ui.Fg));
+                int others = planned - a.Starts;
+                grid.AddChild(Ui.Spin(0, Math.Max(a.Starts, f.Capacity - others), 25, a.Starts, v => Act(FabOps.SetAllocation(D, S, f, id, (int)v)), "", " /mo"));
+                grid.AddChild(Ui.L($"{die:0.0} mm² · {dpw:N0}/wafer", 12, Ui.Muted));
+                grid.AddChild(Ui.L($"{y:P0}", 13));
+                grid.AddChild(Ui.L(chip == null ? "learning only" : Ui.Units(eff * dpw * y), 13, chip == null ? Ui.Muted : Ui.Fg));
+                if (chip != null)
+                {
+                    double made = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.MadeLastMonth);
+                    double sold = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.SoldLastMonth);
+                    double stock = S.Inventory.Where(x => x.DesignId == chip.Id).Sum(x => x.Units);
+                    bool piling = stock >= 1000 && (sold <= 0 || stock > sold * Advisor.StockMonthsWarning);
+                    grid.AddChild(Ui.L($"{Ui.Units(made)} / {Ui.Units(sold)} / {Ui.Units(stock)}", 13, piling ? Ui.Warn : null));
+                }
+                else grid.AddChild(Ui.L("—", 13, Ui.Muted));
+                grid.AddChild(Ui.Btn("Stop", () => Act(FabOps.SetAllocation(D, S, f, id, 0)), "Stop starting wafers for this product (lots already started finish)"));
+            }
+            if (f.Allocations.Count > 0) box.AddChild(grid);
+            else box.AddChild(Ui.L("Idle: nothing planned.", 13, Ui.Warn));
+            if (f.Allocations.Any(a => a.DesignId != null))
+                box.AddChild(Ui.L("Made / sold / stock are last month's figures across all your fabs.", 11, Ui.Muted));
+
+            // add another product
+            var released = S.Designs.Where(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId && !f.Makes(c.Id))
+                                    .OrderByDescending(c => c.ReleasedTick).ToList();
+            var options = released.Select(c => (id: c.Id, name: c.Name)).ToList();
+            if (!f.Makes(null)) options.Add((null, "Test wafers (learning only)"));
+            if (options.Count > 0 && free > 0)
+            {
+                int pick = addChoice.TryGetValue(f.Id, out var p) ? Math.Clamp(p, 0, options.Count - 1) : 0;
+                var add = Ui.H(10);
+                add.AddChild(Ui.L("Add", 14, Ui.Muted));
+                add.AddChild(Ui.Options(options.Select(o => o.name).ToArray(), pick, i => { addChoice[f.Id] = i; }));
+                var spin = Ui.Spin(0, free, 5, free, _ => { }, "", " /mo");
+                add.AddChild(spin);
+                add.AddChild(Ui.Btn("Add to production", () =>
+                {
+                    int i = addChoice.TryGetValue(f.Id, out var q) ? Math.Clamp(q, 0, options.Count - 1) : 0;
+                    Act(FabOps.SetAllocation(D, S, f, options[i].id, (int)spin.Value));
+                }));
+                box.AddChild(add);
+            }
+            else if (released.Count == 0 && !f.Allocations.Any(a => a.DesignId != null))
+                box.AddChild(Ui.Wrap($"No released chip for {n.Name} yet. Test wafers still teach the process, so yields will be better when your first chip arrives.", 12, Ui.Muted));
+            else if (released.Count > 0 && free <= 0)
+                box.AddChild(Ui.L($"To add {released[0].Name}{(released.Count > 1 ? " or another chip" : "")}, free up wafer starts from a product above.", 12, Ui.Muted));
+            box.AddChild(Ui.Wrap("Each product gets its own wafer starts. They share the fab's capacity, defect density and learning; a bigger die yields less per wafer.", 12, Ui.Muted));
+            return box;
         }
 
         Control ExpandRow(Fab f)

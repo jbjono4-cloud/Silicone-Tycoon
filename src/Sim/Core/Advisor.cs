@@ -55,7 +55,7 @@ namespace SiliconeTycoon.Sim
                 var n = d.Node(c.NodeId);
                 if (c.Stage == DesignStage.Released)
                 {
-                    bool making = s.Fabs.Any(f => f.DesignId == c.Id && f.Producing);
+                    bool making = s.Fabs.Any(f => f.Makes(c.Id) && f.Producing);
                     double stock = s.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.Units);
                     double sold = s.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.SoldLastMonth);
                     double made = s.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.MadeLastMonth);
@@ -100,7 +100,10 @@ namespace SiliconeTycoon.Sim
             foreach (var f in s.Fabs.Where(f => f.Producing))
             {
                 if (f.DesignId == null && s.Designs.Any(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId))
-                    Add(2, "Fabs", $"{f.Name} is running test wafers while a released chip could be made there.");
+                    Add(2, "Fabs", $"{f.Name} is running only test wafers while a released chip could be made there.");
+                else if (f.Stage == FabStage.Running && f.PlannedStarts < f.Capacity * 0.9 && f.DesignId != null && !f.Expanding
+                         && s.Designs.Any(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId))
+                    Add(0, "Fabs", $"{f.Name} has {f.Capacity - f.PlannedStarts:N0} wafer starts a month unplanned.");
                 else if (f.Stage == FabStage.Running && f.LastUtilisation < 0.5 && f.DesignId != null && !f.Expanding)
                     Add(0, "Fabs", $"{f.Name} ran at {f.LastUtilisation:P0} last month. An idle fab still costs its running costs and depreciation.");
             }

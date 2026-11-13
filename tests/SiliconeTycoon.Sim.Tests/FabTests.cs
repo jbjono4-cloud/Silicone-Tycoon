@@ -312,5 +312,106 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.True(s.Ledger.LastMonth.Lines[Accounts.FabRunning] < 0);
             Assert.True(s.Ledger.LastMonth.Lines[Accounts.Materials] < 0);
         }
+
+        /// <summary>A chip released straight away, skipping the design programme.</summary>
+        static ChipDesign Released(GameState s, string name, params string[] blocks)
+        {
+            var c = DesignLab.Starter(D, name, "n10um", "dip16p", blocks);
+            c.Id = s.NewId("chip");
+            c.Stats = DesignLab.Analyze(D, s, c);
+            c.Stage = DesignStage.Released;
+            s.Designs.Add(c);
+            return c;
+        }
+
+        [Fact]
+        public void FabsCanMakeSeveralChipsAtOnce()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            var small = Released(s, "Small", "core4", "memif", "io16");
+            var big = Released(s, "Big", "core8", "ram256", "memif", "io16");
+            Assert.True(big.Stats.DieAreaMm2 > small.Stats.DieAreaMm2);
+            Simulation.AdvanceWeeks(D, s, BuildWeeks + RampWeeks);
+            Assert.Equal(0, Calendar.WeekInMonth(s.Tick));
+            Assert.Null(FabOps.SetAllocation(D, s, f, null, 0));
+            Assert.Null(FabOps.SetAllocation(D, s, f, small.Id, 600));
+            Assert.Null(FabOps.SetAllocation(D, s, f, big.Id, 300));
+            Assert.Equal(900, f.PlannedStarts);
+            Assert.Equal(small.Id, f.DesignId);
+            Simulation.AdvanceWeeks(D, s, Calendar.WeeksPerMonth);
+            Assert.Equal(900, f.LastMonthStarts);
+            var started = f.Lots.Where(l => l.StartTick >= s.Tick - Calendar.WeeksPerMonth).ToList();
+            Assert.Equal(600, started.Where(l => l.DesignId == small.Id).Sum(l => l.Wafers));
+            Assert.Equal(300, started.Where(l => l.DesignId == big.Id).Sum(l => l.Wafers));
+            Assert.All(started.Where(l => l.DesignId == big.Id), l => Assert.Equal(big.DieAreaMm2, l.DieAreaMm2, 9));
+            Assert.True(started.First(l => l.DesignId == small.Id).DiesPerWafer > started.First(l => l.DesignId == big.Id).DiesPerWafer);
+            Simulation.AdvanceMonths(D, s, 4);
+            Assert.True(s.Inventory.Where(x => x.DesignId == small.Id).Sum(x => x.MadeLastMonth) > 0);
+            Assert.True(s.Inventory.Where(x => x.DesignId == big.Id).Sum(x => x.MadeLastMonth) > 0);
+        }
+
+        [Fact]
+        public void ProductsCantPlanMoreThanCapacity()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);   // 1000 wafers, all test wafers to begin with
+            var a = Released(s, "A", "core4", "memif", "io16");
+            Assert.Contains("already take", FabOps.SetAllocation(D, s, f, a.Id, 100));
+            Assert.Null(FabOps.SetAllocation(D, s, f, null, 400));
+            Assert.Null(FabOps.SetAllocation(D, s, f, a.Id, 600));
+            Assert.Equal(1000, f.PlannedStarts);
+            Assert.Null(FabOps.SetAllocation(D, s, f, a.Id, 0));
+            Assert.False(f.Makes(a.Id));
+            Assert.Null(f.DesignId);
+        }
+
+        [Fact]
+        public void RampingFabsShareOutWhatTheyCanStart()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            var a = Released(s, "A", "core4", "memif", "io16");
+            FabOps.SetAllocation(D, s, f, null, 500);
+            FabOps.SetAllocation(D, s, f, a.Id, 500);
+            Simulation.AdvanceWeeks(D, s, BuildWeeks + Calendar.WeeksPerMonth);
+            int avail = FabOps.AvailableCapacity(D, f);
+            Assert.True(avail < 1000);
+            var eff = FabOps.EffectiveStarts(D, f);
+            Assert.True(eff.Sum(x => x.starts) <= avail);
+            Assert.InRange(eff.First(x => x.designId == a.Id).starts, avail / 2 - 1, avail / 2);
+        }
+
+        [Fact]
+        public void TotalStartsScaleEveryProduct()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            var a = Released(s, "A", "core4", "memif", "io16");
+            FabOps.SetAllocation(D, s, f, null, 200);
+            FabOps.SetAllocation(D, s, f, a.Id, 600);
+            Assert.Null(FabOps.SetPlannedStarts(f, 400));
+            Assert.Equal(400, f.PlannedStarts);
+            Assert.Equal(300, f.StartsFor(a.Id));
+            Assert.Equal(100, f.StartsFor(null));
+        }
+
+        [Fact]
+        public void OldSingleProductSavesBecomeOneAllocation()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            var a = Released(s, "A", "core4", "memif", "io16");
+            f.Allocations.Clear();
+            f.LegacyDesignId = a.Id;
+            f.LegacyPlannedStarts = 700;
+            s.SaveVersion = 3;
+            var loaded = SaveGame.Deserialize(SaveGame.Serialize(s));
+            var g = loaded.Fabs[0];
+            Assert.Single(g.Allocations);
+            Assert.Equal(a.Id, g.DesignId);
+            Assert.Equal(700, g.PlannedStarts);
+            Assert.Null(g.LegacyDesignId);
+        }
     }
 }

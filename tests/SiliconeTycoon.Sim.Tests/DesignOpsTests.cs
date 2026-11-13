@@ -144,7 +144,8 @@ namespace SiliconeTycoon.Sim.Tests
             Assert.Null(DesignOps.Release(D, s, c));
             while (!f.Producing) Simulation.Advance(D, s);
             Assert.Null(FabOps.AssignDesign(D, s, f, c.Id));
-            Assert.Equal(c.DieAreaMm2, f.DieAreaMm2, 9);
+            Assert.Equal(c.Id, f.DesignId);
+            Assert.Equal(f.Capacity, f.StartsFor(c.Id));
 
             Simulation.AdvanceMonths(D, s, 4);
             var lots = f.Lots.Where(l => l.Done && l.DesignId == c.Id).ToList();
