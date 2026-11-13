@@ -226,7 +226,7 @@ namespace SiliconeTycoon.Sim.Tests
         {
             var s = TestData.NewGame(year: 1975);
             var c = ReleasedChip(s, "n6um", Metric.Control);
-            Market.AddStock(s, c.Id, "Standard", 1e8);
+            Market.AddStock(s, c.Id, "Standard", 1e7);   // a year's worth; a huge pile would cost more to keep than the company has
             Market.SetListing(s, c.Id, "Standard", Market.ExpectedPrice(D.Segment("embedded"), s.YearF));
             Simulation.AdvanceMonths(D, s, 12);
             Assert.True(s.Rep >= Market.RepPerSellingMonth * 11);
