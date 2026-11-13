@@ -27,60 +27,94 @@ namespace SiliconeTycoon.Sim
             };
         }
 
+        /// <summary>What a defect did to the die it landed on.</summary>
+        public enum DefectEffect { Harmless, Repaired, Disabled, Fatal }
+
+        /// <summary>A defect at a spot on a die (mm from the die's corner).</summary>
+        public struct Defect
+        {
+            public double X, Y;
+            public DefectEffect Effect;
+        }
+
+        /// <summary>Precomputed facts about a design used for every die.</summary>
+        public sealed class DieModel
+        {
+            public ChipDesign Chip;
+            public BlockDef[] Defs;
+            public List<BinDef> Bins;
+            public int CoresTotal;
+            public double Mean;
+            public double Typical;
+            public double Alpha;
+            internal bool[] Dead;
+            internal int[] Repaired;
+
+            public DieModel(GameData d, ChipDesign c, double d0, double alpha = YieldModel.DefaultAlpha)
+            {
+                Chip = c;
+                Bins = BinsFor(c);
+                Defs = c.Blocks.Select(p => d.Block(p.BlockId)).ToArray();
+                CoresTotal = Defs.Count(b => b.Kind == BlockKind.Core);
+                Mean = d0 * c.DieAreaMm2 / 100.0;
+                Typical = c.Stats?.MaxClockMHz ?? 0;
+                Alpha = alpha;
+                Dead = new bool[c.Blocks.Count];
+                Repaired = new int[c.Blocks.Count];
+            }
+        }
+
+        /// <summary>
+        /// Makes one die: draws its defects, works out what each one hit, then its top speed, and returns its bin.
+        /// With <paramref name="record"/> null it stops at the first fatal defect (as lots are binned); otherwise it places
+        /// every defect so they can be drawn.
+        /// </summary>
+        public static string Die(Rng rng, DieModel m, List<Defect> record = null)
+        {
+            var c = m.Chip;
+            var placed = c.Blocks;
+            Array.Clear(m.Dead, 0, m.Dead.Length);
+            Array.Clear(m.Repaired, 0, m.Repaired.Length);
+            bool fatal = false;
+            int defects = m.Mean > 0 ? rng.Poisson(rng.Gamma(m.Alpha, m.Mean / m.Alpha)) : 0;
+            for (int k = 0; k < defects && (record != null || !fatal); k++)
+            {
+                double x = rng.NextDouble() * c.DieW;
+                double y = rng.NextDouble() * c.DieH;
+                int hit = -1;
+                for (int b = 0; b < placed.Count; b++)
+                    if (placed[b].Contains(x, y)) { hit = b; break; }
+                DefectEffect effect;
+                if (hit < 0) effect = DefectEffect.Harmless;                                        // empty silicon
+                else if (m.Repaired[hit] < m.Defs[hit].RepairCapacity) { m.Repaired[hit]++; effect = DefectEffect.Repaired; }
+                else if (m.Defs[hit].Disableable) { m.Dead[hit] = true; effect = DefectEffect.Disabled; }
+                else { fatal = true; effect = DefectEffect.Fatal; }
+                record?.Add(new Defect { X = x, Y = y, Effect = effect });
+            }
+
+            if (fatal) return Scrap;
+            int cores = 0, gfx = 0;
+            for (int b = 0; b < placed.Count; b++)
+            {
+                if (m.Dead[b]) continue;
+                if (m.Defs[b].Kind == BlockKind.Core) cores++;
+                else if (m.Defs[b].Kind == BlockKind.Graphics) gfx++;
+            }
+            if (m.CoresTotal > 0 && cores == 0) return Scrap;
+            double speed = m.Typical * (1 + rng.Normal(0, SpeedSigma));
+            foreach (var b in m.Bins)
+                if (cores >= b.MinCores && gfx >= b.MinGraphics && speed >= b.MinClockMHz) return b.Name;
+            return Scrap;
+        }
+
         /// <summary>Bins a sample of dies. Returns counts per bin name plus <see cref="Scrap"/>.</summary>
         public static Dictionary<string, int> Sample(GameData d, Rng rng, ChipDesign c, double d0, int dies, double alpha = YieldModel.DefaultAlpha)
         {
-            var bins = BinsFor(c);
+            var m = new DieModel(d, c, d0, alpha);
             var counts = new Dictionary<string, int>();
-            foreach (var b in bins) counts[b.Name] = 0;
+            foreach (var b in m.Bins) counts[b.Name] = 0;
             counts[Scrap] = 0;
-
-            var placed = c.Blocks;
-            var defs = placed.Select(p => d.Block(p.BlockId)).ToArray();
-            int coresTotal = defs.Count(b => b.Kind == BlockKind.Core);
-            double mean = d0 * c.DieAreaMm2 / 100.0;
-            double typical = c.Stats?.MaxClockMHz ?? 0;
-            var dead = new bool[placed.Count];
-            var repaired = new int[placed.Count];
-
-            for (int i = 0; i < dies; i++)
-            {
-                Array.Clear(dead, 0, dead.Length);
-                Array.Clear(repaired, 0, repaired.Length);
-                bool fatal = false;
-                int defects = mean > 0 ? rng.Poisson(rng.Gamma(alpha, mean / alpha)) : 0;
-                for (int k = 0; k < defects && !fatal; k++)
-                {
-                    double x = rng.NextDouble() * c.DieW;
-                    double y = rng.NextDouble() * c.DieH;
-                    int hit = -1;
-                    for (int b = 0; b < placed.Count; b++)
-                        if (placed[b].Contains(x, y)) { hit = b; break; }
-                    if (hit < 0) continue;                                    // empty silicon
-                    if (repaired[hit] < defs[hit].RepairCapacity) { repaired[hit]++; continue; }
-                    if (defs[hit].Disableable) { dead[hit] = true; continue; }
-                    fatal = true;
-                }
-
-                string bin = Scrap;
-                if (!fatal)
-                {
-                    int cores = 0, gfx = 0;
-                    for (int b = 0; b < placed.Count; b++)
-                    {
-                        if (dead[b]) continue;
-                        if (defs[b].Kind == BlockKind.Core) cores++;
-                        else if (defs[b].Kind == BlockKind.Graphics) gfx++;
-                    }
-                    if (coresTotal == 0 || cores > 0)
-                    {
-                        double speed = typical * (1 + rng.Normal(0, SpeedSigma));
-                        foreach (var b in bins)
-                            if (cores >= b.MinCores && gfx >= b.MinGraphics && speed >= b.MinClockMHz) { bin = b.Name; break; }
-                    }
-                }
-                counts[bin]++;
-            }
+            for (int i = 0; i < dies; i++) counts[Die(rng, m)]++;
             return counts;
         }
 

@@ -8,7 +8,8 @@ namespace SiliconeTycoon.UI
 {
     /// <summary>
     /// Chip projects: the design team, chips through tape-out, silicon, steppings and release, and starting new chips.
-    /// New chips are laid out by the design house from a market brief for now; the floorplan editor arrives in milestone 5.
+    /// A new chip starts from the design house's plan for a market (or a blank die, or an existing chip's floorplan) and
+    /// can be laid out by hand in the floorplan editor.
     /// </summary>
     public partial class DesignTab : GameTab
     {
@@ -22,6 +23,13 @@ namespace SiliconeTycoon.UI
         List<SegmentDef> formSegs = new List<SegmentDef>();
         string formSeg, formNode;
         ChipDesign draft;
+        // floorplan editor
+        bool editing;
+        PanelContainer editorCard;
+        VBoxContainer editTools, binBox;
+        FloorplanCanvas canvas;
+        int addBlockIdx;
+        readonly HashSet<string> showPlan = new HashSet<string>();
 
         public DesignTab() { }
         public DesignTab(Main m) : base(m, "Design") { }
@@ -36,6 +44,7 @@ namespace SiliconeTycoon.UI
             teamBox = Ui.V(6);
             tb.AddChild(teamBox);
             left.AddChild(teamCard);
+            BuildEditor(left);
             list = Ui.V(10);
             left.AddChild(list);
 
@@ -43,15 +52,15 @@ namespace SiliconeTycoon.UI
             AddChild(Ui.Scroll(form));
             var (card, b) = Ui.CardV("New chip");
             form.AddChild(card);
-            b.AddChild(Ui.Wrap("Give the design house a brief and it lays out a chip for that market from this year's blocks: valid, but a little loose and 5% slower than a hand layout. (Your own floorplan editor comes next.)", 13, Ui.Muted));
+            b.AddChild(Ui.Wrap("Give the design house a brief and it lays out a chip for that market from this year's blocks: valid, but a little loose and 5% slower than a hand layout, and it charges a fee. Or edit the floorplan yourself: tighter dies, short wires and full speed, but your own team does all the work.", 13, Ui.Muted));
             b.AddChild(Ui.Heading("Name"));
             nameEdit = new LineEdit { PlaceholderText = "Chip name" };
             b.AddChild(nameEdit);
             b.AddChild(Ui.Heading("Market"));
-            segPick = Ui.Options(new string[0], 0, i => { formSeg = formSegs[i].Id; Replan(); });
+            segPick = Ui.Options(new string[0], 0, i => { formSeg = formSegs[i].Id; if (draft == null || draft.UseDesignHouse) Replan(); else Reanalyze(); });
             b.AddChild(segPick);
             b.AddChild(Ui.Heading("Process node"));
-            nodePick = Ui.Options(new string[0], 0, i => { formNode = formNodes[i].Id; Replan(); });
+            nodePick = Ui.Options(new string[0], 0, i => { formNode = formNodes[i].Id; NodeChanged(); });
             b.AddChild(nodePick);
             var tune = Ui.H(10);
             tune.AddChild(Ui.L("Rated clock", 13, Ui.Muted));
@@ -124,6 +133,18 @@ namespace SiliconeTycoon.UI
             head.AddChild(Ui.L(stage, 14, c.Stage == DesignStage.Validated ? Ui.Warn : c.Stage == DesignStage.Released ? Ui.Ok : Ui.Accent));
             b.AddChild(head);
             b.AddChild(StatsLine(c.Stats));
+            var tools = Ui.H(8);
+            bool open = showPlan.Contains(c.Id);
+            tools.AddChild(Ui.Btn(open ? "Hide floorplan" : "Floorplan", () => { if (!showPlan.Remove(c.Id)) showPlan.Add(c.Id); Refresh(); }));
+            tools.AddChild(Ui.Btn("New chip from this floorplan", () => CopyChip(c),
+                "Start a new draft with this layout, on the process picked under New chip. On a smaller node the blocks shrink in place: tighten the layout to get the smaller die."));
+            b.AddChild(tools);
+            if (open)
+            {
+                var view = new FloorplanCanvas { Data = D, Chip = c, Editable = false, CustomMinimumSize = new Vector2(420, 260) };
+                view.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+                b.AddChild(view);
+            }
 
             switch (c.Stage)
             {
@@ -187,8 +208,10 @@ namespace SiliconeTycoon.UI
                 Fill(nodePick, formNodes.Select(x => x.Name + (S.Fabs.Any(f => f.NodeId == x.Id && f.Stage != FabStage.Closed) ? "" : " (no fab)")).ToArray(), formNodes.FindIndex(x => x.Id == formNode));
             }
             if (string.IsNullOrWhiteSpace(nameEdit.Text)) nameEdit.Text = $"{S.CompanyName.Substring(0, Math.Min(2, S.CompanyName.Length)).ToUpperInvariant()}-{S.Designs.Count + 1}";
-            if (draft == null || draft.NodeId != formNode) Replan();
+            if (draft == null) Replan();
+            else if (draft.NodeId != formNode) NodeChanged();
             else Reanalyze();
+            RefreshEditor();
         }
 
         static void Fill(OptionButton o, string[] items, int selected)
@@ -200,6 +223,16 @@ namespace SiliconeTycoon.UI
 
         string planWhy;
 
+        /// <summary>A design house plan is redone for the new node; a hand layout keeps its blocks, resized for the node.</summary>
+        void NodeChanged()
+        {
+            if (draft == null || draft.UseDesignHouse) { Replan(); return; }
+            draft.NodeId = formNode;
+            DesignLab.Layout(D, draft);
+            Reanalyze();
+            RefreshEditor();
+        }
+
         void Replan()
         {
             if (S == null || planBox == null) return;
@@ -208,6 +241,7 @@ namespace SiliconeTycoon.UI
             draft = seg == null || formNode == null ? null : DesignLab.PlanForSegment(D, S, formNode, seg.Metric, nameEdit.Text, out planWhy, maxPowerW: seg.MaxPowerW);
             if (draft != null && clockSpin != null) clockSpin.SetValueNoSignal(draft.TargetClockMHz);
             Reanalyze();
+            RefreshEditor();
         }
 
         void Reanalyze()
@@ -218,11 +252,21 @@ namespace SiliconeTycoon.UI
             {
                 planBox.AddChild(Ui.Wrap("The design house can't make a chip for that market on that node with this year's blocks and packages." +
                                          (planWhy != null ? $" The full-strength design fails because: {planWhy}" : ""), 13, Ui.Bad));
+                planBox.AddChild(Ui.Btn("Lay out a blank die by hand", StartBlank));
                 return;
             }
             draft.TargetClockMHz = clockSpin.Value;
             draft.Verification = verifSpin.Value / 100.0;
             var st = DesignLab.Analyze(D, S, draft);
+            draft.Stats = st;
+            if (!editing)
+            {
+                var edit = Ui.H(8);
+                edit.AddChild(Ui.Btn("Edit the floorplan", () => { editing = true; RefreshEditor(); }, "Move, reshape, add and remove blocks yourself"));
+                if (!draft.UseDesignHouse) edit.AddChild(Ui.Btn("Back to the design house plan", Replan));
+                planBox.AddChild(edit);
+            }
+            planBox.AddChild(Ui.L(draft.UseDesignHouse ? "Layout: design house (fee, 5% slower, your team does 80% of the work)" : "Layout: by hand (no fee, full speed, your team does all the work)", 12, Ui.Muted));
             var seg = D.Segment(formSeg);
             var team = S.DesignTeams.FirstOrDefault();
 
@@ -250,6 +294,185 @@ namespace SiliconeTycoon.UI
                 planBox.AddChild(Ui.Wrap($"You have no {D.Node(draft.NodeId).Name} fab to make it in yet.", 12, Ui.Warn));
         }
 
+        // ---------------------------------------------------------------- floorplan editor
+
+        void BuildEditor(VBoxContainer parent)
+        {
+            var (card, b) = Ui.CardV("Floorplan editor");
+            editorCard = card;
+            card.Visible = false;
+            editTools = Ui.V(6);
+            b.AddChild(editTools);
+            canvas = new FloorplanCanvas { Data = D, Editable = true, CustomMinimumSize = new Vector2(600, 440) };
+            canvas.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            canvas.Changed = () => Edited();
+            canvas.SelectionChanged = RefreshEditor;
+            b.AddChild(canvas);
+            b.AddChild(Ui.Wrap("Drag blocks to move them: they snap to the die edge and to each other. Right-click turns a block; scroll over the selected block to change its shape (same area). " +
+                               "I/O rings must touch the die edge. Keep cores next to the memory, ROM and graphics they talk to: every mm of wire costs clock speed (dashed lines). " +
+                               "Empty silicon is paid for on every wafer but defects that land there do no harm. A smaller die fits more per wafer and yields better.", 12, Ui.Muted));
+            binBox = Ui.V(4);
+            b.AddChild(binBox);
+            parent.AddChild(card);
+        }
+
+        void StartBlank()
+        {
+            if (formNode == null) return;
+            draft = DesignLab.Blank(D, S, nameEdit.Text, formNode);
+            clockSpin.SetValueNoSignal(0);
+            editing = true;
+            Reanalyze();
+            RefreshEditor();
+        }
+
+        void CopyChip(ChipDesign c)
+        {
+            string node = formNode ?? c.NodeId;
+            draft = DesignLab.CopyAsNewChip(D, c, nameEdit.Text, node);
+            if (draft.NodeId != c.NodeId) draft.UseDesignHouse = false;
+            draft.TargetClockMHz = 0;
+            clockSpin.SetValueNoSignal(0);
+            editing = true;
+            main.Toast(draft.NodeId == c.NodeId
+                ? $"New draft from the {c.Name}'s floorplan."
+                : $"The {c.Name} moved to {D.Node(node).Name}: the blocks shrank in place. Tighten the layout and fit the die.");
+            Refresh();
+        }
+
+        /// <summary>After any hand edit: the layout is now yours, so the design house is out.</summary>
+        void Edited(bool designHouse = false)
+        {
+            if (draft == null) return;
+            draft.UseDesignHouse = designHouse;
+            Reanalyze();
+            RefreshEditor();
+        }
+
+        void RefreshEditor()
+        {
+            if (editorCard == null) return;
+            bool show = editing && draft != null;
+            editorCard.Visible = show;
+            list.Visible = !show;
+            if (!show) return;
+            canvas.Data = D;
+            canvas.Chip = draft;
+            if (draft.Blocks.All(p => p.Id != canvas.Selected)) canvas.Selected = null;
+            canvas.QueueRedraw();
+
+            Ui.Clear(editTools);
+            var n = D.Node(draft.NodeId);
+            var head = Ui.H(10);
+            head.AddChild(Ui.L($"{draft.Name} on {n.Name}", 15));
+            head.AddChild(Ui.Spacer());
+            head.AddChild(Ui.Primary("Done editing", () => { editing = false; RefreshEditor(); Reanalyze(); }));
+            editTools.AddChild(head);
+
+            // add a block
+            var avail = D.Blocks.Where(x => x.Year <= S.Year).ToList();
+            addBlockIdx = Math.Clamp(addBlockIdx, 0, Math.Max(0, avail.Count - 1));
+            var add = Ui.H(8);
+            add.AddChild(Ui.L("Add", 13, Ui.Muted));
+            add.AddChild(Ui.Options(avail.Select(x => $"{x.Name} ({DesignLab.BlockArea(x, n):0.0} mm²)").ToArray(), addBlockIdx, i => addBlockIdx = i));
+            add.AddChild(Ui.Btn("Add block", () =>
+            {
+                if (avail.Count == 0) return;
+                var p = DesignLab.AddBlock(D, draft, avail[Math.Clamp(addBlockIdx, 0, avail.Count - 1)].Id);
+                canvas.Selected = p?.Id;
+                Edited();
+            }));
+            if (addBlockIdx < avail.Count) add.AddChild(Ui.L(avail[addBlockIdx].Description, 11, Ui.Muted));
+            editTools.AddChild(add);
+
+            // the selected block
+            var sel = draft.Blocks.FirstOrDefault(p => p.Id == canvas.Selected);
+            var selRow = Ui.H(8);
+            if (sel != null)
+            {
+                var def = D.Block(sel.BlockId);
+                selRow.AddChild(Ui.L(def?.Name ?? sel.BlockId, 14, FloorplanCanvas.KindColor(def?.Kind ?? BlockKind.Core)));
+                selRow.AddChild(Ui.L($"{sel.W:0.00} × {sel.H:0.00} mm", 12, Ui.Muted));
+                selRow.AddChild(Ui.L("Shape", 13, Ui.Muted));
+                selRow.AddChild(Ui.Spin(0.25, 4, 0.05, Math.Round(sel.Aspect, 2), v => { DesignLab.SetAspect(sel, v); Edited(); }, "", " wide/tall"));
+                selRow.AddChild(Ui.Btn("Turn", () => { DesignLab.SetAspect(sel, 1 / sel.Aspect); Edited(); }));
+                selRow.AddChild(Ui.Btn("Find a free spot", () => { DesignLab.PlaceFree(draft, sel); Edited(); }));
+                selRow.AddChild(Ui.Btn("Remove", () => { draft.Blocks.Remove(sel); canvas.Selected = null; Edited(); }));
+            }
+            else selRow.AddChild(Ui.L("Click a block to select it.", 12, Ui.Muted));
+            editTools.AddChild(selRow);
+
+            // die and package
+            var dieRow = Ui.H(8);
+            dieRow.AddChild(Ui.L("Die", 13, Ui.Muted));
+            dieRow.AddChild(Ui.Spin(0.5, 40, 0.05, draft.DieW, v => { draft.DieW = v; Edited(); }, "", " mm wide"));
+            dieRow.AddChild(Ui.Spin(0.5, 40, 0.05, draft.DieH, v => { draft.DieH = v; Edited(); }, "", " mm tall"));
+            dieRow.AddChild(Ui.Btn("Fit die to blocks", () => { DesignLab.FitDie(draft); Edited(); }, "Trim the die to the blocks' outline"));
+            dieRow.AddChild(Ui.Btn("Design house layout", () => { DesignLab.AutoPlace(D, draft); Edited(true); }, "Let the design house re-pack these blocks (fee, 5% slower)"));
+            dieRow.AddChild(Ui.Btn("Clear", () => { draft.Blocks.Clear(); canvas.Selected = null; Edited(); }));
+            editTools.AddChild(dieRow);
+
+            var pkgs = D.Packages.Where(p => p.Year <= S.Year).OrderBy(p => p.Pins).ThenBy(p => p.Cost).ToList();
+            var pkgRow = Ui.H(8);
+            pkgRow.AddChild(Ui.L("Package", 13, Ui.Muted));
+            pkgRow.AddChild(Ui.Options(pkgs.Select(p => $"{p.Name}: {p.Pins} pins, {p.MaxPowerW:0.#} W, up to {p.MaxDieMm2:0} mm², {Format.Money(p.Cost * S.Inflation)}").ToArray(),
+                pkgs.FindIndex(p => p.Id == draft.PackageId), i => { draft.PackageId = pkgs[i].Id; Edited(draft.UseDesignHouse); }));
+            editTools.AddChild(pkgRow);
+
+            RefreshBins();
+        }
+
+        void RefreshBins()
+        {
+            Ui.Clear(binBox);
+            binBox.AddChild(Ui.Heading("Speed and harvest bins"));
+            binBox.AddChild(Ui.Wrap("Dies go into the first bin they qualify for, best first. A bin can accept dies with a core or graphics unit switched off by a defect, or dies that only reach a lower clock. With no bins, every working die at the rated clock is \"Standard\".", 12, Ui.Muted));
+            var st = draft.Stats;
+            for (int i = 0; i < draft.Bins.Count; i++)
+            {
+                var bin = draft.Bins[i];
+                int idx = i;
+                var row = Ui.H(6);
+                var name = new LineEdit { Text = bin.Name, CustomMinimumSize = new Vector2(120, 0) };
+                name.TextChanged += t => { bin.Name = t.Trim(); Reanalyze(); };
+                row.AddChild(name);
+                row.AddChild(Ui.Spin(0, Math.Max(bin.MinCores, st?.Cores ?? 0), 1, bin.MinCores, v => { bin.MinCores = (int)v; RefreshBinsLater(); }, "", " cores"));
+                row.AddChild(Ui.Spin(0, Math.Max(bin.MinGraphics, st?.GraphicsUnits ?? 0), 1, bin.MinGraphics, v => { bin.MinGraphics = (int)v; RefreshBinsLater(); }, "", " graphics"));
+                row.AddChild(Ui.Spin(0, 100, 0.05, bin.MinClockMHz, v => { bin.MinClockMHz = v; RefreshBinsLater(); }, "at least ", " MHz"));
+                if (idx > 0) row.AddChild(Ui.Btn("Up", () => { draft.Bins.RemoveAt(idx); draft.Bins.Insert(idx - 1, bin); RefreshBinsLater(); }));
+                row.AddChild(Ui.Btn("Remove", () => { draft.Bins.RemoveAt(idx); RefreshBinsLater(); }));
+                binBox.AddChild(row);
+            }
+            binBox.AddChild(Ui.Btn("Add bin", () =>
+            {
+                draft.Bins.Add(new BinDef
+                {
+                    Name = draft.Bins.Count == 0 ? "Standard" : $"Bin {draft.Bins.Count + 1}",
+                    MinCores = st?.Cores ?? 0,
+                    MinGraphics = st?.GraphicsUnits ?? 0,
+                    MinClockMHz = Math.Round(st?.ClockMHz ?? 0, 2),
+                });
+                RefreshBinsLater();
+            }));
+
+            // expected mix at the yield-estimate learning level
+            if (st != null && st.Valid && draft.Blocks.Count > 0)
+            {
+                var n = D.Node(draft.NodeId);
+                double d0 = LearningCurve.D0(n, DesignLab.EstimateLearning);
+                var mix = Binning.Sample(D, new Rng(WaferMap.Hash(draft.Name + draft.NodeId + draft.Blocks.Count)), draft, d0, 2000);
+                int total = Math.Max(1, mix.Values.Sum());
+                binBox.AddChild(Ui.L($"Expected mix at {DesignLab.EstimateLearning:0} months of fab learning (D0 {d0:0.0}): " +
+                                     string.Join(" · ", mix.Select(kv => $"{kv.Key} {kv.Value / (double)total:P0}")), 12, Ui.Fg));
+            }
+        }
+
+        void RefreshBinsLater()
+        {
+            Reanalyze();
+            RefreshBins();
+        }
+
         void StartDraft()
         {
             if (draft == null) { main.Toast("Pick a market and node the design house can work with."); return; }
@@ -262,6 +485,7 @@ namespace SiliconeTycoon.UI
             if (err == null)
             {
                 draft = null;
+                editing = false;
                 nameEdit.Text = "";
             }
             Act(err);

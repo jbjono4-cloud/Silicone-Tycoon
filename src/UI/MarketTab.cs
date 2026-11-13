@@ -9,6 +9,7 @@ namespace SiliconeTycoon.UI
     /// <summary>Selling chips: segments, customers' requests for quotes and your bids, contracts, the warehouse and price list, rivals.</summary>
     public partial class MarketTab : GameTab
     {
+        string confirmSurplus;
         VBoxContainer left, right;
 
         class BidDraft
@@ -188,6 +189,31 @@ namespace SiliconeTycoon.UI
                                                    && Market.Perf(c, Binning.BinsFor(c)[0].Name, seg.Metric) >= seg.NeedAt(S.YearF) * Market.OpenMarketMinShare
                                                    && Market.Power(c, Binning.BinsFor(c)[0].Name) <= seg.MaxPowerW).ToList();
                 b.AddChild(Ui.L(fits.Count == 0 ? "Distributors won't stock it any more: it's too far behind." : "Distributors stock it for: " + string.Join(", ", fits.Select(x => x.Name.ToLower())), 12, fits.Count == 0 ? Ui.Warn : Ui.Muted));
+                double held = S.Inventory.Where(x => x.DesignId == c.Id).Sum(x => x.Units);
+                if (held >= 1)
+                {
+                    var surplus = Ui.H(8);
+                    double quote = Market.BrokerQuote(D, S, c.Id);
+                    surplus.AddChild(Ui.L($"{Ui.Units(held)} in stock cost {Format.Money(Market.CarryingCost(S, c.Id))} a month to keep · a broker offers {Format.Big(quote)} (${quote / held:0.00} each)", 12, Ui.Muted));
+                    surplus.AddChild(Ui.Spacer());
+                    string key = c.Id;
+                    if (confirmSurplus == key + "|sell")
+                    {
+                        surplus.AddChild(Ui.Btn("Confirm sale", () => { confirmSurplus = null; Act(Market.SellToBroker(D, S, key)); }));
+                        surplus.AddChild(Ui.Btn("Keep them", () => { confirmSurplus = null; Refresh(); }));
+                    }
+                    else if (confirmSurplus == key + "|scrap")
+                    {
+                        surplus.AddChild(Ui.Btn("Confirm scrap", () => { confirmSurplus = null; Act(Market.ScrapStock(S, key)); }));
+                        surplus.AddChild(Ui.Btn("Keep them", () => { confirmSurplus = null; Refresh(); }));
+                    }
+                    else
+                    {
+                        surplus.AddChild(Ui.Btn("Sell all to a broker", () => { confirmSurplus = key + "|sell"; Refresh(); }, "Cash now, at a fraction of the market price. Bigger dumps fetch less per chip."));
+                        surplus.AddChild(Ui.Btn("Scrap", () => { confirmSurplus = key + "|scrap"; Refresh(); }, "Destroy the stock: no money, but no more warehouse costs."));
+                    }
+                    b.AddChild(surplus);
+                }
                 foreach (var bin in Binning.BinsFor(c))
                 {
                     string key = c.Id + "|" + bin.Name;

@@ -194,7 +194,7 @@ namespace SiliconeTycoon.Sim
             var f = new Fab
             {
                 Id = s.NewId("fab"),
-                Name = string.IsNullOrWhiteSpace(name) ? $"{l.Name} {n.Name} fab" : name.Trim(),
+                Name = string.IsNullOrWhiteSpace(name) ? DefaultName(l, n) : name.Trim(),
                 LocationId = locationId,
                 NodeId = nodeId,
                 Capacity = capacity,
@@ -209,6 +209,19 @@ namespace SiliconeTycoon.Sim
             s.Fabs.Add(f);
             string grant = q.Subsidy > 0 ? $" Government grants cover {Format.Big(q.Subsidy)}." : "";
             s.Log($"Construction starts on {f.Name}: {capacity:N0} wafers a month, {Format.Big(q.NetCapex)} over {q.BuildMonths} months.{grant}", 1);
+            return null;
+        }
+
+        /// <summary>The name a fab gets when the player doesn't choose one. Retooling renames fabs that still have it.</summary>
+        public static string DefaultName(LocationDef l, ProcessNodeDef n) => $"{l.Name} {n.Name} fab";
+
+        /// <summary>Renames a fab.</summary>
+        public static string Rename(GameState s, Fab f, string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "The fab needs a name.";
+            name = name.Trim();
+            if (s.Fabs.Any(x => x != f && x.Name == name)) return "You already have a fab with that name.";
+            f.Name = name;
             return null;
         }
 
@@ -352,6 +365,8 @@ namespace SiliconeTycoon.Sim
             f.BookValue -= writeOff;
             f.MonthlyDepreciation = 0;
             f.Lots.RemoveAll(l => !l.Done);
+            var site = d.Location(f.LocationId);
+            if (site != null && f.Name == DefaultName(site, d.Node(f.NodeId))) f.Name = DefaultName(site, d.Node(nodeId));
             f.NodeId = nodeId;
             f.Allocations.Clear();
             f.Stage = FabStage.Construction;

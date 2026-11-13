@@ -302,6 +302,96 @@ namespace SiliconeTycoon.Sim
             return null;
         }
 
+        // ---------------------------------------------------------------- hand layout helpers
+
+        /// <summary>Adds a block to a floorplan at the first free spot inside the die (or just right of it if the die is full).</summary>
+        public static PlacedBlock AddBlock(GameData d, ChipDesign c, string blockId)
+        {
+            var b = d.Block(blockId);
+            var n = d.Node(c.NodeId);
+            if (b == null || n == null) return null;
+            int next = 1;
+            while (c.Blocks.Any(x => x.Id == "b" + next)) next++;
+            var p = new PlacedBlock { Id = "b" + next, BlockId = blockId, Aspect = 1 };
+            Shape(p, BlockArea(b, n));
+            PlaceFree(c, p);
+            c.Blocks.Add(p);
+            return p;
+        }
+
+        /// <summary>Moves a block to the first spot (scanning in 0.1 mm steps) where it fits inside the die without overlapping.</summary>
+        public static void PlaceFree(ChipDesign c, PlacedBlock p, double step = 0.1)
+        {
+            var others = c.Blocks.Where(x => x != p).ToList();
+            for (double y = 0; y + p.H <= c.DieH + Eps; y += step)
+                for (double x = 0; x + p.W <= c.DieW + Eps; x += step)
+                {
+                    p.X = Math.Round(x, 2);
+                    p.Y = Math.Round(y, 2);
+                    if (!others.Any(o => Overlaps(o, p))) return;
+                }
+            p.X = Math.Round(Math.Max(c.DieW, others.Count == 0 ? 0 : others.Max(o => o.X + o.W)) + 0.3, 2);
+            p.Y = 0;
+        }
+
+        /// <summary>Changes a block's shape, keeping its area and its centre.</summary>
+        public static void SetAspect(PlacedBlock p, double aspect)
+        {
+            double cx = p.X + p.W / 2, cy = p.Y + p.H / 2;
+            double area = p.W * p.H;
+            p.Aspect = aspect;
+            Shape(p, area);
+            p.X = Math.Round(cx - p.W / 2, 3);
+            p.Y = Math.Round(cy - p.H / 2, 3);
+        }
+
+        /// <summary>Shrinks (or grows) the die to the blocks' bounding box, moving everything so it starts at the corner.</summary>
+        public static void FitDie(ChipDesign c)
+        {
+            if (c.Blocks.Count == 0) return;
+            double minX = c.Blocks.Min(p => p.X), minY = c.Blocks.Min(p => p.Y);
+            foreach (var p in c.Blocks)
+            {
+                p.X -= minX;
+                p.Y -= minY;
+            }
+            c.DieW = Math.Ceiling(c.Blocks.Max(p => p.X + p.W) * 100 - 1e-6) / 100;
+            c.DieH = Math.Ceiling(c.Blocks.Max(p => p.Y + p.H) * 100 - 1e-6) / 100;
+        }
+
+        /// <summary>
+        /// A new draft from an existing chip's floorplan, optionally on another node (a die shrink: blocks keep their
+        /// positions and get smaller, so the layout needs tightening). Development history is not copied.
+        /// </summary>
+        public static ChipDesign CopyAsNewChip(GameData d, ChipDesign src, string name, string nodeId = null)
+        {
+            var c = src.Clone();
+            c.Id = null;
+            c.Name = name;
+            c.NodeId = nodeId ?? src.NodeId;
+            c.Stage = DesignStage.Draft;
+            c.TeamId = null;
+            c.WeeksLeft = 0;
+            c.StartedTick = -1;
+            c.ReleasedTick = -1;
+            c.Stepping = 0;
+            c.HiddenBugs = 0;
+            c.FoundBugs = 0;
+            c.Showstoppers = 0;
+            c.EscapedBugs = 0;
+            c.MaskSpend = 0;
+            c.Stats = null;
+            Layout(d, c);
+            return c;
+        }
+
+        /// <summary>A blank die to lay out by hand.</summary>
+        public static ChipDesign Blank(GameData d, GameState s, string name, string nodeId)
+        {
+            var pkg = d.Packages.Where(p => p.Year <= s.Year).OrderBy(p => p.Cost).FirstOrDefault();
+            return new ChipDesign { Name = name, NodeId = nodeId, PackageId = pkg?.Id, DieW = 4, DieH = 4, UseDesignHouse = false };
+        }
+
         /// <summary>A starter design: the given blocks on a node and package, placed by the design house.</summary>
         public static ChipDesign Starter(GameData d, string name, string nodeId, string packageId, params string[] blockIds)
         {

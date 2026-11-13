@@ -78,7 +78,9 @@ namespace SiliconeTycoon.Sim
                                                         && Market.Power(c, bin) <= seg.MaxPowerW).ToList();
                     var listing = s.Listings.FirstOrDefault(l => l.DesignId == c.Id);
                     if (stock >= 1000 && fits.Count == 0 && !s.Contracts.Any(k => k.DesignId == c.Id && k.Status == ContractStatus.Active))
-                        Add(2, "Market", $"Distributors won't take the {c.Name} any more: it's too far behind. Stop making it.");
+                        Add(2, "Market", making
+                            ? $"Distributors won't take the {c.Name} any more: it's too far behind. Stop making it, and sell the stock to a broker or scrap it."
+                            : $"Distributors won't take the {Format.Units(stock)} {c.Name} chips in the warehouse: they cost {Format.Money(Market.CarryingCost(s, c.Id))} a month to keep. Sell them to a broker or scrap them.");
                     else if (stock >= 1000 && listing == null)
                         Add(2, "Market", $"The {c.Name} isn't listed with distributors, so {Format.Units(stock)} chips are sitting unsold.");
                     else if (listing != null && fits.Count > 0)
@@ -99,8 +101,18 @@ namespace SiliconeTycoon.Sim
 
             foreach (var f in s.Fabs.Where(f => f.Producing))
             {
-                if (f.DesignId == null && s.Designs.Any(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId))
+                bool releasedHere = s.Designs.Any(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId);
+                if (f.DesignId == null && releasedHere)
                     Add(2, "Fabs", $"{f.Name} is running only test wafers while a released chip could be made there.");
+                else if (f.DesignId == null && !releasedHere)
+                {
+                    var coming = s.Designs.FirstOrDefault(c => c.NodeId == f.NodeId && (c.Stage == DesignStage.Designing || c.Stage == DesignStage.Silicon || c.Stage == DesignStage.Validated));
+                    var nodeName = d.Node(f.NodeId).Name;
+                    if (coming == null)
+                        Add(2, "Design", $"{f.Name} runs {nodeName}, but you have no {nodeName} chip, released or in design. Chips only run on the node they're laid out for: start one for {nodeName}.");
+                    else
+                        Add(0, "Design", $"{f.Name} is running test wafers until the {coming.Name} ({nodeName}) is released.");
+                }
                 else if (f.Stage == FabStage.Running && f.PlannedStarts < f.Capacity * 0.9 && f.DesignId != null && !f.Expanding
                          && s.Designs.Any(c => c.Stage == DesignStage.Released && c.NodeId == f.NodeId))
                     Add(0, "Fabs", $"{f.Name} has {f.Capacity - f.PlannedStarts:N0} wafer starts a month unplanned.");

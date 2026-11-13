@@ -23,7 +23,10 @@ namespace SiliconeTycoon.UI
         readonly Dictionary<string, string> retoolChoice = new Dictionary<string, string>();
         readonly Dictionary<string, int> expandChoice = new Dictionary<string, int>();
         readonly Dictionary<string, int> addChoice = new Dictionary<string, int>();
-        string confirmClose;
+        // wafer map shown per fab: product id ("" = test wafers) and a resample counter
+        readonly Dictionary<string, string> mapFor = new Dictionary<string, string>();
+        readonly Dictionary<string, int> mapDraw = new Dictionary<string, int>();
+        string confirmClose, renaming;
 
         public FabsTab() { }
         public FabsTab(Main m) : base(m, "Fabs") { }
@@ -142,7 +145,20 @@ namespace SiliconeTycoon.UI
             var site = D.Location(f.LocationId);
             var (card, b) = Ui.CardV(null, 6);
             var head = Ui.H(10);
-            head.AddChild(Ui.Title(f.Name, 17));
+            if (renaming == f.Id)
+            {
+                var edit = new LineEdit { Text = f.Name, CustomMinimumSize = new Vector2(320, 0) };
+                edit.TextSubmitted += t => { renaming = null; Act(FabOps.Rename(S, f, t)); };
+                head.AddChild(edit);
+                head.AddChild(Ui.Btn("Save", () => { renaming = null; Act(FabOps.Rename(S, f, edit.Text)); }));
+                head.AddChild(Ui.Btn("Cancel", () => { renaming = null; Refresh(); }));
+                Callable.From(() => { if (IsInstanceValid(edit)) edit.GrabFocus(); }).CallDeferred();
+            }
+            else
+            {
+                head.AddChild(Ui.Title(f.Name, 17));
+                head.AddChild(Ui.Btn("Rename", () => { renaming = f.Id; Refresh(); }));
+            }
             head.AddChild(Ui.L($"{n.Name} · {site.Name}", 14, Ui.Muted));
             head.AddChild(Ui.Spacer());
             string stage = f.Stage switch
@@ -207,6 +223,35 @@ namespace SiliconeTycoon.UI
             return card;
         }
 
+        Control WaferMapBox(Fab f, ProcessNodeDef n, double d0, string key)
+        {
+            var chip = key == "" ? null : S.Design(key);
+            if (key != "" && chip?.Stats == null) { mapFor.Remove(f.Id); return Ui.L("", 12); }
+            int draw = mapDraw.TryGetValue(f.Id, out var k) ? k : 0;
+            var map = WaferMap.Simulate(D, n, chip, d0, WaferMap.Hash($"{f.Id}|{key}|{S.MonthIndex}|{draw}"));
+            var row = Ui.H(14);
+            var view = new WaferMapView { CustomMinimumSize = new Vector2(380, 380) };
+            view.SetMap(map);
+            row.AddChild(view);
+            var side = Ui.V(4);
+            side.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            side.AddChild(Ui.Title($"{chip?.Name ?? "Test wafer"} on a {n.WaferMm:0} mm wafer", 15));
+            side.AddChild(Ui.L($"{map.Dies.Count:N0} whole dies fit ({map.FormulaDies:N0} by the costing formula) · {map.DieW:0.00} × {map.DieH:0.00} mm · D0 {d0:0.00}/cm²", 12, Ui.Muted));
+            foreach (var bin in map.BinOrder)
+            {
+                int c = map.Counts[bin];
+                var line = Ui.H(6);
+                line.AddChild(new ColorRect { Color = WaferMapView.BinColor(map.BinOrder, bin), CustomMinimumSize = new Vector2(12, 12), SizeFlagsVertical = SizeFlags.ShrinkCenter });
+                line.AddChild(Ui.L($"{bin}: {c:N0} ({c / (double)Math.Max(1, map.Dies.Count):P0})", 13));
+                side.AddChild(line);
+            }
+            side.AddChild(Ui.L($"Formula yield at this D0: {YieldModel.Yield(d0, map.DieW * map.DieH):P0} good of every die (before binning for speed and harvesting).", 12, Ui.Muted));
+            side.AddChild(Ui.Wrap("White dots killed a die. Yellow ones switched off a spare core or graphics unit; blue ones were fixed by spare RAM rows; faint ones fell in empty silicon. Hover a die for details.", 12, Ui.Muted));
+            side.AddChild(Ui.Btn("Another wafer", () => { mapDraw[f.Id] = draw + 1; Refresh(); }));
+            row.AddChild(side);
+            return row;
+        }
+
         /// <summary>The chips the fab makes, each with its own wafer starts, plus a row to add another.</summary>
         Control ProductsBox(Fab f, ProcessNodeDef n, double d0)
         {
@@ -223,9 +268,9 @@ namespace SiliconeTycoon.UI
                 box.AddChild(Ui.L($"Still ramping: only {avail:N0} starts a month are possible, so every product gets {avail / (double)planned:P0} of its plan.", 12, Ui.Warn));
 
             var effective = FabOps.EffectiveStarts(D, f).ToDictionary(x => x.designId ?? "", x => x.starts);
-            var grid = new GridContainer { Columns = 7 };
+            var grid = new GridContainer { Columns = 8 };
             grid.AddThemeConstantOverride("h_separation", 14);
-            foreach (var h in new[] { "Chip", "Wafer starts", "Die", "Yield", "Good dies/mo", "Made / sold / stock", "" })
+            foreach (var h in new[] { "Chip", "Wafer starts", "Die", "Yield", "Good dies/mo", "Made / sold / stock", "", "" })
                 grid.AddChild(Ui.L(h, 12, Ui.Muted));
             foreach (var a in f.Allocations.OrderBy(a => a.DesignId == null).ThenByDescending(a => a.Starts).ToList())
             {
@@ -250,10 +295,14 @@ namespace SiliconeTycoon.UI
                     grid.AddChild(Ui.L($"{Ui.Units(made)} / {Ui.Units(sold)} / {Ui.Units(stock)}", 13, piling ? Ui.Warn : null));
                 }
                 else grid.AddChild(Ui.L("—", 13, Ui.Muted));
+                string key = id ?? "";
+                bool showing = mapFor.TryGetValue(f.Id, out var shown) && shown == key;
+                grid.AddChild(Ui.Btn(showing ? "Hide wafer" : "Wafer map", () => { if (showing) mapFor.Remove(f.Id); else mapFor[f.Id] = key; Refresh(); }, "Look at one simulated wafer at today's defect density"));
                 grid.AddChild(Ui.Btn("Stop", () => Act(FabOps.SetAllocation(D, S, f, id, 0)), "Stop starting wafers for this product (lots already started finish)"));
             }
             if (f.Allocations.Count > 0) box.AddChild(grid);
             else box.AddChild(Ui.L("Idle: nothing planned.", 13, Ui.Warn));
+            if (mapFor.TryGetValue(f.Id, out var mapKey)) box.AddChild(WaferMapBox(f, n, d0, mapKey));
             if (f.Allocations.Any(a => a.DesignId != null))
                 box.AddChild(Ui.L("Made / sold / stock are last month's figures across all your fabs.", 11, Ui.Muted));
 

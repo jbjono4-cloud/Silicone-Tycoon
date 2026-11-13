@@ -45,6 +45,12 @@ namespace SiliconeTycoon.Sim
         public const double ContractUpside = 1.3;
         /// <summary>How much more buyers pay when chips are scarce: up to this much extra when nothing is available.</summary>
         public const double ShortagePremium = 1.0;
+        /// <summary>Storage, handling and insurance per chip per month, 1970 dollars.</summary>
+        public const double StoragePerChip = 0.004;
+        /// <summary>Monthly cost of the money tied up in stock, as a share of what the chips cost to make.</summary>
+        public const double CapitalShare = 0.01;
+        /// <summary>Share of a chip's market value a surplus broker pays before volume discounts.</summary>
+        public const double BrokerShare = 0.25;
 
         /// <summary>The segment's shortage last month (0 = plenty of chips, 1 = none to be had).</summary>
         public static double LastShortage(GameState s, string segmentId) =>
@@ -564,6 +570,80 @@ namespace SiliconeTycoon.Sim
                 it.SoldThisMonth = 0;
             }
             s.Inventory.RemoveAll(x => x.Units <= 0.5 && x.MadeLastMonth <= 0 && x.SoldLastMonth <= 0);
+            double carrying = s.Inventory.Sum(it => CarryingCost(s, it));
+            if (carrying > 0) s.Ledger.Book(Accounts.Warehousing, -carrying);
+        }
+
+        // ------------------------------------------------------------------ surplus stock
+
+        /// <summary>Monthly cost of keeping a stock item: storage plus the cost of the money tied up in it.</summary>
+        public static double CarryingCost(GameState s, StockItem it)
+        {
+            if (it.Units <= 0) return 0;
+            double made = s.Design(it.DesignId)?.Stats?.CostPerGoodDie ?? 0;
+            if (double.IsInfinity(made) || double.IsNaN(made)) made = 0;
+            return it.Units * (StoragePerChip * s.Inflation + CapitalShare * made);
+        }
+
+        public static double CarryingCost(GameState s, string designId) =>
+            s.Inventory.Where(x => x.DesignId == designId).Sum(x => CarryingCost(s, x));
+
+        /// <summary>
+        /// What a surplus broker pays per chip for a stock item: a quarter of what the chip is worth in the market it suits
+        /// best (less if it's behind or too hot for that market), discounted further the more you dump compared with the
+        /// market's monthly demand.
+        /// </summary>
+        public static double BrokerPrice(GameData d, GameState s, StockItem it)
+        {
+            var c = s.Design(it.DesignId);
+            if (c?.Stats == null || it.Units <= 0) return 0;
+            double year = s.YearF, best = 0;
+            foreach (var seg in d.Segments.Where(x => x.Active(year)))
+            {
+                double need = seg.NeedAt(year);
+                double fit = need > 0 ? Math.Min(1, Perf(c, it.Bin, seg.Metric) / need) : 0;
+                if (Power(c, it.Bin) > seg.MaxPowerW) fit *= 0.5;
+                double demand = Math.Max(1, seg.DemandAt(year));
+                double value = ExpectedPrice(seg, year) * fit / (1 + it.Units / demand);
+                best = Math.Max(best, value);
+            }
+            return BrokerShare * best;
+        }
+
+        public static double BrokerQuote(GameData d, GameState s, string designId) =>
+            s.Inventory.Where(x => x.DesignId == designId).Sum(x => x.Units * BrokerPrice(d, s, x));
+
+        /// <summary>Sells every chip of a design in the warehouse to a surplus broker, all at once, for cash now.</summary>
+        public static string SellToBroker(GameData d, GameState s, string designId)
+        {
+            var c = s.Design(designId);
+            if (c == null) return "Unknown chip.";
+            var items = s.Inventory.Where(x => x.DesignId == designId && x.Units >= 1).ToList();
+            if (items.Count == 0) return $"You have no {c.Name} chips in stock.";
+            double units = 0, cash = 0;
+            foreach (var it in items)
+            {
+                cash += it.Units * BrokerPrice(d, s, it);
+                units += it.Units;
+                it.Units = 0;
+            }
+            s.Ledger.Book(Accounts.BrokerSales, cash);
+            s.Listings.RemoveAll(l => l.DesignId == designId);
+            s.Log($"A surplus broker takes {Format.Units(units)} {c.Name} chips for {Format.Big(cash)} (${cash / units:0.00} each).", 0);
+            return null;
+        }
+
+        /// <summary>Destroys a design's stock: no money, but no more warehouse costs.</summary>
+        public static string ScrapStock(GameState s, string designId)
+        {
+            var c = s.Design(designId);
+            if (c == null) return "Unknown chip.";
+            double units = s.Inventory.Where(x => x.DesignId == designId).Sum(x => x.Units);
+            if (units < 1) return $"You have no {c.Name} chips in stock.";
+            foreach (var it in s.Inventory.Where(x => x.DesignId == designId)) it.Units = 0;
+            s.Listings.RemoveAll(l => l.DesignId == designId);
+            s.Log($"{Format.Units(units)} {c.Name} chips are scrapped.", 0);
+            return null;
         }
     }
 }
