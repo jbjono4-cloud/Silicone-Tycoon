@@ -51,6 +51,13 @@ namespace SiliconeTycoon.Sim
         public bool Retooling;
         /// <summary>Times this fab has been retooled.</summary>
         public int Retools;
+
+        /// <summary>Wafer starts a month being added by an expansion in progress (0 = none).</summary>
+        public int ExpandCapacity;
+        public double ExpandCapex;
+        public double ExpandPaid;
+        public int ExpandWeeksTotal;
+        public int ExpandWeeksLeft;
         public int BuildWeeksLeft;
         public int OrderedTick;
 
@@ -78,6 +85,7 @@ namespace SiliconeTycoon.Sim
         public List<WaferLot> Lots = new List<WaferLot>();
 
         [JsonIgnore] public bool Producing => Stage == FabStage.Ramping || Stage == FabStage.Running;
+        [JsonIgnore] public bool Expanding => ExpandCapacity > 0;
     }
 
     public class FabQuote
@@ -109,6 +117,9 @@ namespace SiliconeTycoon.Sim
         public const double RetoolTimeShare = 0.6;
         /// <summary>Share of the old equipment's remaining value written off when it's replaced.</summary>
         public const double RetoolWriteOff = 0.7;
+        /// <summary>Expansion build time as a share of the node's normal build time.</summary>
+        public const double ExpandTimeShare = 0.5;
+        public const int MinExpansion = 100;
         public const int MinCapacity = 100;
         public const int MaxCapacity = 200000;
         /// <summary>How many dies of a lot are simulated individually; the result is scaled to the lot.</summary>
@@ -239,6 +250,7 @@ namespace SiliconeTycoon.Sim
             if (q.Problem != null) return q;
             if (f.Stage == FabStage.Closed) q.Problem = $"{f.Name} is closed.";
             else if (f.Stage == FabStage.Construction) q.Problem = $"{f.Name} is already being built or retooled.";
+            else if (f.Expanding) q.Problem = $"{f.Name} is being expanded. Retool it once the expansion is finished.";
             else if (n.FeatureNm >= old.FeatureNm) q.Problem = $"{f.Name} already runs {old.Name}; retool it to a newer node.";
             return q;
         }
@@ -286,17 +298,86 @@ namespace SiliconeTycoon.Sim
         }
 
         /// <summary>
+        /// What adding capacity to a working fab would cost: the difference between a fab of the new size and one of the
+        /// current size, at today's prices on this site. Bigger fabs cost less per wafer, so expanding is cheaper than
+        /// building a second fab of the same size, and the fab keeps running while the new tools go in.
+        /// </summary>
+        public static FabQuote ExpandQuote(GameData d, GameState s, Fab f, int extra)
+        {
+            var now = Quote(d, s, f.NodeId, f.LocationId, f.Capacity);
+            var bigger = Quote(d, s, f.NodeId, f.LocationId, f.Capacity + extra);
+            var n = d.Node(f.NodeId);
+            var q = new FabQuote
+            {
+                Capex = bigger.Capex - now.Capex,
+                Subsidy = bigger.Subsidy - now.Subsidy,
+                NetCapex = bigger.NetCapex - now.NetCapex,
+                MonthlyRunning = bigger.MonthlyRunning - now.MonthlyRunning,
+                WaferCost = bigger.WaferCost,
+                RecommendedEngineering = bigger.RecommendedEngineering,
+                BuildMonths = Math.Max(1, (int)Math.Ceiling(n.BuildMonths * ExpandTimeShare)),
+                RampMonths = 0,
+            };
+            if (f.Stage == FabStage.Closed) q.Problem = $"{f.Name} is closed.";
+            else if (!f.Producing) q.Problem = $"{f.Name} has to be built and running before you can expand it.";
+            else if (f.Expanding) q.Problem = $"{f.Name} is already being expanded.";
+            else if (extra < MinExpansion) q.Problem = $"Add at least {MinExpansion} wafer starts a month.";
+            else if (f.Capacity + extra > MaxCapacity) q.Problem = $"A fab can't run more than {MaxCapacity:N0} wafer starts a month.";
+            return q;
+        }
+
+        /// <summary>Starts adding capacity to a working fab. It keeps producing at its current capacity until the new tools are in.</summary>
+        public static string Expand(GameData d, GameState s, Fab f, int extra)
+        {
+            var q = ExpandQuote(d, s, f, extra);
+            if (q.Problem != null) return q.Problem;
+            double firstPayment = q.NetCapex / q.BuildMonths;
+            if (s.Cash < firstPayment) return $"You need at least {Format.Money(firstPayment)} for the first month of the expansion.";
+            f.ExpandCapacity = extra;
+            f.ExpandCapex = q.NetCapex;
+            f.ExpandPaid = 0;
+            f.ExpandWeeksTotal = q.BuildMonths * Calendar.WeeksPerMonth;
+            f.ExpandWeeksLeft = f.ExpandWeeksTotal;
+            s.Log($"{f.Name} starts an expansion: +{extra:N0} wafer starts a month for {Format.Big(q.NetCapex)} over {q.BuildMonths} months.", 1);
+            return null;
+        }
+
+        static void FinishExpansion(GameState s, Fab f)
+        {
+            double rest = f.ExpandCapex - f.ExpandPaid;
+            if (rest > 0.005)
+            {
+                s.Ledger.Invest(rest);
+                f.ExpandPaid += rest;
+            }
+            int extra = f.ExpandCapacity;
+            bool full = f.PlannedStarts >= f.Capacity;
+            f.Capacity += extra;
+            if (full) f.PlannedStarts = f.Capacity;             // a fab that was running flat out keeps doing so
+            f.BookValue += f.ExpandPaid;
+            f.MonthlyDepreciation = f.BookValue / DepreciationMonths;
+            f.CapexReal += f.ExpandPaid / s.Inflation;           // running costs grow with the new equipment
+            f.ExpandCapacity = 0;
+            f.ExpandCapex = 0;
+            f.ExpandPaid = 0;
+            s.Log($"{f.Name}'s expansion is finished: {f.Capacity:N0} wafer starts a month.", 1);
+        }
+
+        /// <summary>
         /// Closes a fab for good: running and engineering costs stop, wafers in progress are scrapped, the equipment is sold
         /// for <see cref="SalvageShare"/> of its remaining value and the rest is written off. Works on a fab under construction too.
         /// </summary>
         public static string Close(GameData d, GameState s, Fab f)
         {
             if (f.Stage == FabStage.Closed) return $"{f.Name} is already closed.";
-            double value = f.Stage == FabStage.Construction ? f.CapexPaid + f.BookValue : f.BookValue;   // a retooling fab still carries its old equipment
+            double value = (f.Stage == FabStage.Construction ? f.CapexPaid + f.BookValue : f.BookValue)   // a retooling fab still carries its old equipment
+                           + f.ExpandPaid;                                                                  // and an unfinished expansion is lost too
             double salvage = value * SalvageShare;
             s.Ledger.Cash += salvage;
             if (value - salvage > 0) s.Ledger.Accrue(Accounts.FabClosure, -(value - salvage));
             f.Stage = FabStage.Closed;
+            f.ExpandCapacity = 0;
+            f.ExpandPaid = 0;
             f.BookValue = 0;
             f.MonthlyDepreciation = 0;
             f.PlannedStarts = 0;
@@ -338,6 +419,7 @@ namespace SiliconeTycoon.Sim
             }
             if (!f.Producing) return;
 
+            if (f.Expanding && --f.ExpandWeeksLeft <= 0) FinishExpansion(s, f);
             f.RunningWeeks++;
             double rate = LearningCurve.Rate(f.LastUtilisation, LearningCurve.EngineerFactor(f.EngineeringBudget, RecommendedEngineering(s, f)));
             f.Learning += rate / Calendar.WeeksPerMonth;
@@ -417,6 +499,15 @@ namespace SiliconeTycoon.Sim
             }
             if (!f.Producing) return;
 
+            if (f.Expanding)
+            {
+                double payment = Math.Min(f.ExpandCapex - f.ExpandPaid, f.ExpandCapex / (f.ExpandWeeksTotal / (double)Calendar.WeeksPerMonth));
+                if (payment > 0)
+                {
+                    s.Ledger.Invest(payment);
+                    f.ExpandPaid += payment;
+                }
+            }
             s.Ledger.Book(Accounts.FabRunning, -RunningCost(d, s, f));
             s.Ledger.Book(Accounts.FabEngineering, -f.EngineeringBudget);
             if (f.BookValue > 0)

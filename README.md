@@ -14,6 +14,7 @@ The vertical slice covers 1970–1985 as a newly founded integrated company. Mil
 - **Process nodes** 10 µm → 1.5 µm with density, clock, wafer size, cost and defect data.
 - **Node race**: research programmes with a hidden slip roll; more budget cuts the slip risk; slips keep costing money.
 - **Fabs** in real-world locations: quote, subsidies, construction, ramp, wafer starts, lots, running costs, depreciation.
+- **Fab expansion**: add capacity to a working fab at the marginal cost of a bigger fab (cheaper per wafer than a new one) in half the node's build time, while it keeps producing.
 - **Fab retooling and closure**: re-equip a fab for a newer node at about 55% of a new fab's cost (70% if the wafer size changes) and 60% of the build time, with learning starting again and most old equipment written off; or close a fab, salvaging 15% of its book value.
 - **Learning curve**: defect density falls faster with volume and engineering spend.
 - **Yield model**: dies per wafer, clustered-defect (negative binomial) yield, Monte Carlo lot sampling.
@@ -34,7 +35,7 @@ Open the project in Godot 4.7 .NET, press **Build**, then **Run** (F5).
 - **Time** runs in weeks: Pause / 1× / 2× / 4× / 8× (game weeks per second), **Space** to pause, *Next week* to step. The game pauses itself when a customer asks for bids, a chip's silicon needs a decision, a node is ready, or something goes badly wrong (switch these on the Company tab).
 - **Company**: last month's books, the bank (borrow and repay), revenue/profit and cash charts, news.
 - **Design**: your design team, chips through tape-out → silicon → validation → steppings → release. New chips come from a market brief laid out by the design house (the floorplan editor is milestone 5); tune the rated clock and verification effort and see area, clock, power, performance, yield, cost per chip and design effort before you commit.
-- **Fabs**: build fabs (real sites, grants, live quote), choose what each makes and how many wafer starts, set process-engineering spend, watch defect density and lot binning, retool to a newer node or close.
+- **Fabs**: build fabs (real sites, grants, live quote), choose what each makes and how many wafer starts, set process-engineering spend, watch defect density and lot binning, expand a working fab, retool it to a newer node or close it.
 - **Research**: the node race — start programmes at 0.5–2× budget (more money, less slip risk), watch for slips, see where the rivals are.
 - **Market**: demand and prices by segment, customers' requests for quotes (bid with a released or in-development chip, the whole volume or part of it, with a live score against the industry), your contracts, the warehouse and distributor price list, rivals and customers.
 

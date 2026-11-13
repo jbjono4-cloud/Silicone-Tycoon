@@ -215,6 +215,57 @@ namespace SiliconeTycoon.Sim.Tests
         }
 
         [Fact]
+        public void ExpandingIsCheaperPerWaferThanANewFab()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            Simulation.AdvanceWeeks(D, s, BuildWeeks);
+            var q = FabOps.ExpandQuote(D, s, f, 500);
+            Assert.Null(q.Problem);
+            Assert.True(q.NetCapex < FabOps.Quote(D, s, f.NodeId, f.LocationId, 500).NetCapex);
+            Assert.True(q.BuildMonths < D.Node(f.NodeId).BuildMonths);
+        }
+
+        [Fact]
+        public void ExpansionNeedsAWorkingFabAndOneAtATime()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            Assert.Contains("built and running", FabOps.Expand(D, s, f, 500));
+            Simulation.AdvanceWeeks(D, s, BuildWeeks);
+            Assert.Contains("at least", FabOps.Expand(D, s, f, 10));
+            Assert.Null(FabOps.Expand(D, s, f, 500));
+            Assert.Contains("already being expanded", FabOps.Expand(D, s, f, 500));
+            Assert.Contains("being expanded", FabOps.RetoolQuote(D, s, f, "n10um").Problem ?? "being expanded");
+        }
+
+        [Fact]
+        public void ExpansionKeepsProducingThenAddsCapacity()
+        {
+            var s = TestData.NewGame();
+            var f = Build(s);
+            Simulation.AdvanceMonths(D, s, 24);
+            Assert.Equal(FabStage.Running, f.Stage);
+            double book = f.BookValue;
+            double running = FabOps.RunningCost(D, s, f);
+            var q = FabOps.ExpandQuote(D, s, f, 500);
+            Assert.Null(FabOps.Expand(D, s, f, 500));
+
+            Simulation.AdvanceMonths(D, s, 2);
+            Assert.Equal(1000, f.Capacity);
+            Assert.Equal(1000, f.LastMonthStarts);   // still running flat out
+
+            Simulation.AdvanceWeeks(D, s, q.BuildMonths * Calendar.WeeksPerMonth);
+            Assert.False(f.Expanding);
+            Assert.Equal(1500, f.Capacity);
+            Assert.Equal(1500, f.PlannedStarts);
+            Assert.True(f.BookValue > book);
+            Assert.True(FabOps.RunningCost(D, s, f) > running);
+            Simulation.AdvanceMonths(D, s, 2);
+            Assert.Equal(1500, f.LastMonthStarts);
+        }
+
+        [Fact]
         public void RunningCostsAppearOnceProducing()
         {
             var s = TestData.NewGame();

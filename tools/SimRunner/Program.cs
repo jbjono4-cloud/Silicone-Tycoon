@@ -170,15 +170,17 @@ while (s.Tick < endTick && !s.GameOver)
                 break;
             }
 
-        // sold out on the newest node: add another fab there (fabs still ramping don't count)
-        var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Stage == FabStage.Running).ToList();
-        if (!building && bestFabs.Count > 0 && bestFabs.All(f => f.LastUtilisation > 0.9) && stock < Math.Max(monthlyOrders, lastSales) * 0.5)
+        // sold out on the newest node: expand the fab there (cheaper than a second fab, and it keeps running)
+        var bestFabs = s.Fabs.Where(f => f.NodeId == best && f.Stage == FabStage.Running && !f.Expanding).ToList();
+        if (bestFabs.Count > 0 && bestFabs.All(f => f.LastUtilisation > 0.9) && stock < Math.Max(monthlyOrders, lastSales) * 0.5)
         {
-            var q = FabOps.Quote(d, s, best, CheapestSite(), 1000);
-            if (q.Problem == null && Spendable() > q.NetCapex * 1.5)
+            var target = bestFabs.OrderBy(f => f.Capacity).First();
+            int extra = Math.Max(FabOps.MinExpansion, target.Capacity / 2 / 100 * 100);
+            var q = FabOps.ExpandQuote(d, s, target, extra);
+            if (q.Problem == null && Spendable() > q.NetCapex * 1.2)
             {
                 EnsureCash(q.NetCapex / q.BuildMonths * 2);
-                Fail(FabOps.Build(d, s, $"Fab {s.Fabs.Count + 1}", best, CheapestSite(), 1000));
+                Fail(FabOps.Expand(d, s, target, extra));
             }
         }
 

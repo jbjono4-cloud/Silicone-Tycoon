@@ -21,6 +21,7 @@ namespace SiliconeTycoon.UI
         int formCap = 1000;
         // per-fab choices that survive refreshes
         readonly Dictionary<string, string> retoolChoice = new Dictionary<string, string>();
+        readonly Dictionary<string, int> expandChoice = new Dictionary<string, int>();
         string confirmClose;
 
         public FabsTab() { }
@@ -217,9 +218,41 @@ namespace SiliconeTycoon.UI
                 }
             }
 
+            b.AddChild(ExpandRow(f));
             b.AddChild(RetoolRow(f));
             b.AddChild(CloseRow(f));
             return card;
+        }
+
+        Control ExpandRow(Fab f)
+        {
+            var box = Ui.V(4);
+            if (f.Expanding)
+            {
+                double done = 1 - f.ExpandWeeksLeft / (double)Math.Max(1, f.ExpandWeeksTotal);
+                var prog = Ui.H(10);
+                prog.AddChild(Ui.L($"Expanding +{f.ExpandCapacity:N0}", 14, Ui.Accent));
+                prog.AddChild(Ui.Bar(done, 1, null, 200));
+                prog.AddChild(Ui.L($"{Math.Max(1, f.ExpandWeeksLeft / Calendar.WeeksPerMonth)} month(s) left · {Format.Big(f.ExpandPaid)} of {Format.Big(f.ExpandCapex)} paid · still running at {f.Capacity:N0}", 13, Ui.Muted));
+                box.AddChild(prog);
+                return box;
+            }
+            if (!expandChoice.TryGetValue(f.Id, out var extra)) extra = Math.Max(FabOps.MinExpansion, (int)Math.Round(f.Capacity / 2.0 / 100) * 100);
+            extra = Math.Clamp(extra, FabOps.MinExpansion, Math.Max(FabOps.MinExpansion, FabOps.MaxCapacity - f.Capacity));
+            expandChoice[f.Id] = extra;
+            var q = FabOps.ExpandQuote(D, S, f, extra);
+            var row = Ui.H(10);
+            row.AddChild(Ui.L("Expand by", 14, Ui.Muted));
+            row.AddChild(Ui.Spin(FabOps.MinExpansion, Math.Max(FabOps.MinExpansion, FabOps.MaxCapacity - f.Capacity), 100, extra, v => { expandChoice[f.Id] = (int)v; Refresh(); }, "+", " /mo"));
+            var perWafer = q.NetCapex / Math.Max(1, extra);
+            var newFab = FabOps.Quote(D, S, f.NodeId, f.LocationId, extra);
+            row.AddChild(Ui.L($"{Format.Big(q.NetCapex)} over {q.BuildMonths} months ({Format.Money(perWafer)} per wafer of capacity vs {Format.Money(newFab.NetCapex / Math.Max(1, extra))} in a new fab) · +{Format.Money(q.MonthlyRunning)}/mo running", 13, Ui.Muted));
+            var go = Ui.Btn("Expand", () => Act(FabOps.Expand(D, S, f, expandChoice[f.Id])));
+            go.Disabled = q.Problem != null;
+            row.AddChild(go);
+            box.AddChild(row);
+            if (q.Problem != null) box.AddChild(Ui.L(q.Problem, 12, Ui.Muted));
+            return box;
         }
 
         Control RetoolRow(Fab f)
