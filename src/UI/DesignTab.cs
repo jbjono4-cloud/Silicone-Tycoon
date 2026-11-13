@@ -198,11 +198,14 @@ namespace SiliconeTycoon.UI
             if (items.Length > 0) o.Selected = Math.Clamp(selected, 0, items.Length - 1);
         }
 
+        string planWhy;
+
         void Replan()
         {
             if (S == null || planBox == null) return;
             var seg = D.Segment(formSeg);
-            draft = seg == null || formNode == null ? null : DesignLab.PlanForSegment(D, S, formNode, seg.Metric, nameEdit.Text, maxPowerW: seg.MaxPowerW);
+            planWhy = null;
+            draft = seg == null || formNode == null ? null : DesignLab.PlanForSegment(D, S, formNode, seg.Metric, nameEdit.Text, out planWhy, maxPowerW: seg.MaxPowerW);
             if (draft != null && clockSpin != null) clockSpin.SetValueNoSignal(draft.TargetClockMHz);
             Reanalyze();
         }
@@ -213,7 +216,8 @@ namespace SiliconeTycoon.UI
             Ui.Clear(planBox);
             if (draft == null)
             {
-                planBox.AddChild(Ui.Wrap("The design house can't make a chip for that market on that node with this year's blocks and packages.", 13, Ui.Bad));
+                planBox.AddChild(Ui.Wrap("The design house can't make a chip for that market on that node with this year's blocks and packages." +
+                                         (planWhy != null ? $" The full-strength design fails because: {planWhy}" : ""), 13, Ui.Bad));
                 return;
             }
             draft.TargetClockMHz = clockSpin.Value;

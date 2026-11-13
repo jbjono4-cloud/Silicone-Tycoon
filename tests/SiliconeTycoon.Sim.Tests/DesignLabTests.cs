@@ -156,5 +156,32 @@ namespace SiliconeTycoon.Sim.Tests
             var c = Chip("dip40c", "core16", "memif", "io40");
             Assert.Contains(DesignLab.Analyze(D, s, c).Notes, n => n.Severity == 2 && n.Text.Contains("1978"));
         }
+
+        [Fact]
+        public void DesignHouseStepsDownToAChipThatFits()
+        {
+            // 1980 home computer on 5 µm: the 16-bit core with the biggest RAM is too big for any package, so it must step down
+            var s = Simulation.NewGame(D, new NewGameOptions { StartYear = 1980 });
+            var seg = D.Segment("home");
+            var c = DesignLab.PlanForSegment(D, s, "n5um", seg.Metric, "H-1", out string why, maxPowerW: seg.MaxPowerW);
+            Assert.NotNull(c);
+            Assert.Null(why);
+            var st = DesignLab.Analyze(D, s, c);
+            Assert.True(st.Valid, st.FirstError);
+            Assert.True(st.PowerW <= seg.MaxPowerW);
+        }
+
+        [Theory]
+        [InlineData(1976)]
+        [InlineData(1980)]
+        [InlineData(1985)]
+        public void EveryMarketHasAChipOnEveryCurrentNode(int year)
+        {
+            var s = Simulation.NewGame(D, new NewGameOptions { StartYear = year });
+            foreach (var seg in D.Segments.Where(x => x.From <= year))
+                foreach (var n in D.Nodes.Where(x => x.Year <= year && x.Year >= year - 8))
+                    Assert.True(DesignLab.PlanForSegment(D, s, n.Id, seg.Metric, "X", out string why, ignoreNodeReady: true, maxPowerW: seg.MaxPowerW) != null,
+                                $"{seg.Name} on {n.Name} in {year}: {why}");
+        }
     }
 }

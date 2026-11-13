@@ -238,42 +238,67 @@ namespace SiliconeTycoon.Sim
         /// if needed to stay under <paramref name="maxPowerW"/>. Null if nothing fits.
         /// </summary>
         public static ChipDesign PlanForSegment(GameData d, GameState s, string nodeId, Metric metric, string name,
+            bool ignoreNodeReady = false, double maxPowerW = double.PositiveInfinity) =>
+            PlanForSegment(d, s, nodeId, metric, name, out _, ignoreNodeReady, maxPowerW);
+
+        /// <summary>
+        /// As above, but says why nothing fits. The design house starts from the strongest blocks for the market and steps
+        /// down (a smaller core, less memory, a narrower bus) until the chip fits a package and the market's power limit.
+        /// </summary>
+        public static ChipDesign PlanForSegment(GameData d, GameState s, string nodeId, Metric metric, string name, out string why,
             bool ignoreNodeReady = false, double maxPowerW = double.PositiveInfinity)
         {
+            why = null;
             int year = s.Year;
             List<BlockDef> Avail(BlockKind k) => d.Blocks.Where(b => b.Kind == k && b.Year <= year).ToList();
-            var cores = Avail(BlockKind.Core);
-            var core = metric == Metric.Compute
-                ? cores.OrderByDescending(b => b.Ipc).FirstOrDefault()
-                : cores.OrderByDescending(b => b.Ipc / b.Transistors).FirstOrDefault();
-            var ids = new List<string>();
-            if (core != null) ids.Add(core.Id);
-            BlockDef extra = metric switch
-            {
-                Metric.Control => Avail(BlockKind.Rom).OrderByDescending(b => b.RomBytes).FirstOrDefault(),
-                Metric.Compute => Avail(BlockKind.Ram).Where(b => core == null || b.Transistors <= core.Transistors).OrderByDescending(b => b.RamBytes).FirstOrDefault(),
-                _ => Avail(BlockKind.Graphics).OrderByDescending(b => b.Graphics).FirstOrDefault(),
-            };
-            if (extra != null) ids.Add(extra.Id);
-            var mems = Avail(BlockKind.MemoryInterface);
-            var mem = metric == Metric.Control
-                ? mems.OrderBy(b => b.Transistors).FirstOrDefault()          // control code needs little bandwidth
-                : mems.OrderByDescending(b => b.BytesPerClock).FirstOrDefault();
-            if (mem != null) ids.Add(mem.Id);
 
-            foreach (var io in Avail(BlockKind.Io).OrderBy(b => b.Pins))
-                foreach (var pkg in d.Packages.Where(p => p.Year <= year).OrderBy(p => p.Cost))
-                {
-                    var c = Starter(d, name, nodeId, pkg.Id, ids.Concat(new[] { io.Id }).ToArray());
-                    var st = Analyze(d, s, c, ignoreNodeReady);
-                    if (st.Valid && st.PowerW > maxPowerW)
+            // strongest first for the market
+            var cores = metric == Metric.Compute
+                ? Avail(BlockKind.Core).OrderByDescending(b => b.Ipc).ToList()
+                : Avail(BlockKind.Core).OrderByDescending(b => b.Ipc / b.Transistors).ThenByDescending(b => b.Ipc).ToList();
+            List<BlockDef> Extras(BlockDef core) => (metric switch
+            {
+                Metric.Control => Avail(BlockKind.Rom).OrderByDescending(b => b.RomBytes),
+                Metric.Compute => Avail(BlockKind.Ram).Where(b => core == null || b.Transistors <= core.Transistors).OrderByDescending(b => b.RamBytes),
+                _ => Avail(BlockKind.Graphics).OrderByDescending(b => b.Graphics),
+            }).ToList();
+            var mems = metric == Metric.Control
+                ? Avail(BlockKind.MemoryInterface).OrderBy(b => b.Transistors).ToList()          // control code needs little bandwidth
+                : Avail(BlockKind.MemoryInterface).OrderByDescending(b => b.BytesPerClock).ToList();
+            var ios = Avail(BlockKind.Io).OrderBy(b => b.Pins).ToList();
+            var pkgs = d.Packages.Where(p => p.Year <= year).OrderBy(p => p.Cost).ToList();
+
+            var coreChoices = cores.Count > 0 ? cores.Cast<BlockDef>().ToList() : new List<BlockDef> { null };
+            foreach (var core in coreChoices)
+            {
+                var extras = Extras(core);
+                var extraChoices = extras.Cast<BlockDef>().Append(null).ToList();          // fall back to none
+                if (metric == Metric.Graphics) extraChoices.RemoveAt(extraChoices.Count - 1); // a console chip needs graphics
+                foreach (var extra in extraChoices)
+                    foreach (var mem in mems.Cast<BlockDef>().Append(null))
                     {
-                        c.TargetClockMHz = Math.Floor(st.ClockMHz * maxPowerW / st.PowerW * 0.95 * 100) / 100;
-                        if (c.TargetClockMHz <= 0) continue;
-                        st = Analyze(d, s, c, ignoreNodeReady);
+                        var ids = new List<string>();
+                        if (core != null) ids.Add(core.Id);
+                        if (extra != null) ids.Add(extra.Id);
+                        if (mem != null) ids.Add(mem.Id);
+                        foreach (var io in ios)
+                            foreach (var pkg in pkgs)
+                            {
+                                if (pkg.Pins < io.Pins) continue;
+                                var c = Starter(d, name, nodeId, pkg.Id, ids.Concat(new[] { io.Id }).ToArray());
+                                var st = Analyze(d, s, c, ignoreNodeReady);
+                                if (st.Valid && st.PowerW > maxPowerW)
+                                {
+                                    c.TargetClockMHz = Math.Floor(st.ClockMHz * maxPowerW / st.PowerW * 0.95 * 100) / 100;
+                                    if (c.TargetClockMHz <= 0) continue;
+                                    st = Analyze(d, s, c, ignoreNodeReady);
+                                }
+                                if (st.Valid && st.PowerW <= maxPowerW) return c;
+                                if (why == null && !st.Valid) why = st.Notes.FirstOrDefault(x => x.Severity >= 2)?.Text;
+                            }
                     }
-                    if (st.Valid && st.PowerW <= maxPowerW) return c;
-                }
+            }
+            why ??= "No combination of this year's blocks and packages works.";
             return null;
         }
 
